@@ -1,0 +1,32 @@
+# Run `pre-commit autoupdate` to refresh revs to latest stable versions.
+#
+# Strategy:
+#   Auto-fix what can be fixed (ruff lint fixable rules, ruff format, whitespace)
+#   Block what cannot (unfixable lint errors, secrets, large files, bad yaml/toml)
+#   pyright and pytest are NOT here — too slow; they run via `make check`/`make test` and CI.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.9
+    hooks:
+      # Auto-fix import sorting, unused imports, and other fixable lint rules.
+      # --exit-non-zero-on-fix: if files were modified, fail so developer sees
+      # the changes, stages them (git add -u), and retries the commit.
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      # Auto-format. Same mechanic: modifies files → commit fails → add + retry.
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      # Block accidental large dataset commits. Fixtures up to 2 MB are allowed;
+      # raw research data must live outside the repo or in git-lfs.
+      - id: check-added-large-files
+        args: [--maxkb=2000]
+      # Block committing private keys or credentials.
+      - id: detect-private-key

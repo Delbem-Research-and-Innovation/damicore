@@ -1,0 +1,41 @@
+{
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "strict",
+  "executionEnvironments": [
+    {
+      "root": "packages/damicore",
+      "extraPaths": [
+        "packages/damicore/src",
+        ".venv/lib/python3.12/site-packages"
+      ]
+    },
+    {
+      "root": "packages/damicore_clusterizer",
+      "extraPaths": [
+        "packages/damicore_clusterizer/src",
+        ".venv/lib/python3.12/site-packages"
+      ]
+    },
+    {
+      "root": "packages/damicore_distance",
+      "extraPaths": [
+        "packages/damicore_distance/src",
+        ".venv/lib/python3.12/site-packages"
+      ]
+    },
+    {
+      "root": "packages/damicore_normalizer",
+      "extraPaths": [
+        "packages/damicore_normalizer/src",
+        ".venv/lib/python3.12/site-packages"
+      ]
+    },
+    {
+      "root": "packages/damicore_tree_builder",
+      "extraPaths": [
+        "packages/damicore_tree_builder/src",
+        ".venv/lib/python3.12/site-packages"
+      ]
+    }
+  ]
+}
