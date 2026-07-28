@@ -38,6 +38,9 @@ pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 htmlcov/
+
+# Local scratch / generated output (never commit)
+.temp/
 .tox/
 .nox/
 .coverage

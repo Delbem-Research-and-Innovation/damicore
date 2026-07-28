@@ -1,0 +1,37 @@
+[project]
+name = "synthetic-data"
+version = "0.1.0"
+description = "Internal-only synthetic dataset generator for exercising the DAMICORE packages in tests. Not published, not a runtime dependency of any damicore-* package."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "Ennio Politi Lopes", email = "enniolopes@users.noreply.github.com" }]
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Private :: Do Not Upload",
+]
+dependencies = ["typer>=0.26.7"]
+
+[project.scripts]
+synthetic-data = "synthetic_data.cli:app"
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = ["ruff>=0.9", "pyright>=1.1", "pytest>=8", "pytest-cov>=6"]
+
+[tool.ruff]
+line-length = 100
+exclude = [".venv", "dist", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["unit: fast isolated unit tests"]
+addopts = "--cov=synthetic_data --cov-report=term-missing"
