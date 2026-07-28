@@ -219,6 +219,3 @@ models/**/paper/*.run.xml
 models/**/paper/*.synctex.gz
 models/**/paper/*.toc
 models/**/paper/*.pdf
-
-# damicore_normalizer legacy outputs (per key-group, kept locally only)
-models/fixtures/dataset-seade-pop-age/output-normalizer-cod_distr-ano-idade/[0-9]*.txt

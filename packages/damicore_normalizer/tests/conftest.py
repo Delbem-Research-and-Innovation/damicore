@@ -1,12 +1,18 @@
-import shutil
 from pathlib import Path
 
 import pytest
 
 from damicore_normalizer import NormalizerInput, NormalizerOutput, normalize_dataset
 
-FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "dataset-seade-pop-age"
 SOURCE_CSV_NAME = "raw-dataset-seade-pop-age.csv"
+
+_RAW_CSV_CONTENT = (
+    "cod_distr;ano;Idade;sexo;populacao\n"
+    "1;2020;0;M;100\n"
+    "1;2020;0;F;200\n"
+    "1;2020;1;M;150\n"
+    "1;2020;1;F;180\n"
+)
 
 
 def _build_contract(csv_path: Path) -> NormalizerInput:
@@ -24,7 +30,7 @@ def _build_contract(csv_path: Path) -> NormalizerInput:
 @pytest.fixture(scope="module")
 def isolated_csv_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     csv_dir = tmp_path_factory.mktemp("normalizer_fixture")
-    shutil.copy(FIXTURES_DIR / SOURCE_CSV_NAME, csv_dir / SOURCE_CSV_NAME)
+    (csv_dir / SOURCE_CSV_NAME).write_text(_RAW_CSV_CONTENT, encoding="latin-1")
     return csv_dir
 
 

@@ -5,10 +5,7 @@ import typer
 
 from damicore_tree_builder.functional import run
 
-app = typer.Typer()
 
-
-@app.command()
 def build(
     input_path: Annotated[
         str, typer.Option("--input", help="Path to input distance matrix CSV file.")

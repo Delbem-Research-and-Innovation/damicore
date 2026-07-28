@@ -45,3 +45,4 @@ select = ["E", "F", "I", "UP"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = ["unit: fast isolated unit tests"]
+addopts = "--cov=damicore --cov-report=term-missing"
