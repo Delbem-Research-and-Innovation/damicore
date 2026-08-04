@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 
 def _default_code(name: str) -> str:
@@ -10,7 +9,7 @@ def _default_code(name: str) -> str:
 
 
 class DamicoreError(Exception):
-    def __init__(self, message: str, *, code: str | None = None, **context: Any) -> None:
+    def __init__(self, message: str, *, code: str | None = None, **context: object) -> None:
         super().__init__(message)
         self.code = code or _default_code(type(self).__name__)
         self.context = context

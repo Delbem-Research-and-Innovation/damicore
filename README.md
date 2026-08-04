@@ -47,7 +47,7 @@ imports `google.colab`, accesses the network, or uploads data.
 ## Development
 
 ```bash
-uv sync --all-packages --group dev
+make install
 make check
 make test
 make build

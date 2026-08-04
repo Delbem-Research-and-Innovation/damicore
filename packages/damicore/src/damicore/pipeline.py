@@ -4,6 +4,7 @@ import logging
 import platform
 import time
 import zlib
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -104,7 +105,7 @@ class PipelineJournal:
 
     def transition(self, state: str) -> None:
         self.manifest["status"] = state
-        self.manifest["updated_at"] = _utc_now()
+        self.manifest["updated_at"] = utc_now()
         self.manifest["stages"] = self.receipts
         atomic_json(self.manifest_path, self.manifest)
 
@@ -113,7 +114,7 @@ class PipelineJournal:
         started = time.monotonic()
         self.receipts[stage] = {
             "status": "running",
-            "started_at": _utc_now(),
+            "started_at": utc_now(),
             "finished_at": None,
             "runtime": self.runtime,
             "inputs": [self._input_record(path) for path in inputs],
@@ -135,7 +136,7 @@ class PipelineJournal:
         receipt.update(
             {
                 "status": "completed",
-                "finished_at": _utc_now(),
+                "finished_at": utc_now(),
                 "outputs": [self._record(path) for path in outputs],
                 "metrics": {**metrics, "seconds": time.monotonic() - started},
             }
@@ -197,7 +198,10 @@ class PipelineJournal:
         return path
 
 
-def _utc_now() -> str:
-    from datetime import UTC, datetime
+def utc_now() -> str:
+    """Return the current instant as a UTC ISO-8601 string.
 
+    Every timestamp written into a run record comes from here, so a manifest, a receipt and a
+    report cannot disagree about the clock or the offset they were stamped with.
+    """
     return datetime.now(UTC).isoformat()

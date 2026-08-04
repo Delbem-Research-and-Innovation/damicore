@@ -13,6 +13,8 @@ from damicore_distance import (
 )
 from damicore_distance.ncd import normalized_compression_distance
 
+pytestmark = pytest.mark.unit
+
 
 def _normalized(tmp_path):
     source = tmp_path / "input.csv"

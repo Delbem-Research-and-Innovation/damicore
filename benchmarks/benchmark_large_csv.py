@@ -4,11 +4,25 @@ import argparse
 import json
 import math
 import resource
+import sys
 import time
 from pathlib import Path
 
 from damicore import ExecutionConfig, ResourceLimits, estimate, run
 from synthetic_data import generate_csv
+
+# Object counts required by specification section 24.4.
+OBJECT_COUNTS = (100, 250, 500, 1_000)
+
+
+def _directory_bytes(directory: Path) -> int:
+    return sum(path.stat().st_size for path in directory.rglob("*") if path.is_file())
+
+
+def _peak_rss_bytes() -> int:
+    # ru_maxrss is KiB on Linux; every measurement below reports bytes so the two benchmarks
+    # in this file stay comparable.
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
 
 
 def main() -> None:
@@ -17,7 +31,23 @@ def main() -> None:
     parser.add_argument("--rows", type=int, default=1_000)
     parser.add_argument("--target-bytes", type=int, default=2_147_483_648)
     parser.add_argument("--skip-large", action="store_true")
+    parser.add_argument(
+        "--objects",
+        type=int,
+        nargs="+",
+        default=OBJECT_COUNTS,
+        help=(
+            "object counts to sweep; defaults to the counts required by specification "
+            "section 24.4. A caller that narrows this is trading coverage for wall time."
+        ),
+    )
     arguments = parser.parse_args()
+    if sorted(arguments.objects) != sorted(OBJECT_COUNTS):
+        print(
+            f"note: sweeping {sorted(arguments.objects)} instead of the "
+            f"specified {list(OBJECT_COUNTS)}",
+            file=sys.stderr,
+        )
     arguments.directory.mkdir(parents=True, exist_ok=True)
     measurements: dict[str, object] = {}
     if not arguments.skip_large:
@@ -30,7 +60,7 @@ def main() -> None:
             seed=42,
         )
         large_preview = estimate(large_path, split="columns")
-        peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+        peak_rss = _peak_rss_bytes()
         if large_path.stat().st_size < arguments.target_bytes * 0.9:
             raise RuntimeError("large benchmark CSV did not reach 90% of target size")
         if peak_rss > 1_610_612_736:
@@ -39,31 +69,38 @@ def main() -> None:
             "input_bytes": large_preview.input_size_bytes,
             "peak_rss_bytes": peak_rss,
         }
-    for columns in (16, 32, 64, 128):
+    for objects in sorted(arguments.objects):
         csv_path = generate_csv(
-            arguments.directory / f"benchmark-{columns}.csv",
+            arguments.directory / f"benchmark-{objects}.csv",
             rows=arguments.rows,
-            columns=columns,
+            columns=objects,
             clusters=4,
             seed=42,
         )
         execution = ExecutionConfig(
             workers=1,
-            limits=ResourceLimits(max_objects=1_000),
+            limits=ResourceLimits(max_objects=max(objects, 1_000)),
         )
+        run_dir = arguments.directory / f"run-{objects}"
         started = time.monotonic()
         preview = estimate(csv_path, execution=execution)
         result = run(
             csv_path,
-            output_dir=arguments.directory / f"run-{columns}",
+            output_dir=run_dir,
             progress=False,
             execution=execution,
         )
         result.close()
-        measurements[f"algorithm_{columns}"] = {
-            "seconds": time.monotonic() - started,
+        seconds = time.monotonic() - started
+        # Specification section 24.4 requires time, disk, RSS and pairs per second.
+        measurements[f"algorithm_{objects}"] = {
+            "object_count": preview.object_count,
+            "pair_count": preview.pair_count,
+            "seconds": seconds,
+            "pairs_per_second": preview.pair_count / seconds if seconds > 0 else 0.0,
             "input_bytes": preview.input_size_bytes,
-            "peak_rss": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+            "run_disk_bytes": _directory_bytes(run_dir),
+            "peak_rss_bytes": _peak_rss_bytes(),
         }
     print(json.dumps(measurements, indent=2, sort_keys=True))
 

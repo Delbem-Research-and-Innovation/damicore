@@ -5,6 +5,8 @@ import pytest
 
 from damicore_normalizer import NormalizationConfig, NormalizerError, normalize_csv
 
+pytestmark = pytest.mark.unit
+
 
 def _csv(tmp_path):
     path = tmp_path / "input.csv"

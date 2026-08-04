@@ -6,9 +6,8 @@ import json
 import logging
 import shutil
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -70,17 +69,18 @@ from damicore.manifest import (
     atomic_json,
     sha256_file,
 )
-from damicore.pipeline import PipelineJournal, resume_fingerprint, runtime_fingerprint
+from damicore.pipeline import (
+    PipelineJournal,
+    resume_fingerprint,
+    runtime_fingerprint,
+    utc_now,
+)
 from damicore.progress import distance_progress
 from damicore.result import DamicoreResult, RunReport, artifact_paths
 
 SCHEMA_VERSION = 1
 VERSION = "0.1.0"
 logger = logging.getLogger(__name__)
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _execution(execution: ExecutionConfig | None) -> ExecutionConfig:
@@ -90,15 +90,35 @@ def _execution(execution: ExecutionConfig | None) -> ExecutionConfig:
         raise ConfigurationError(str(exc)) from exc
 
 
+# The public API takes these as `str` so a caller gets ConfigurationError rather than a
+# TypeError, but every stage config declares them as literals. Validating by *returning* the
+# literal makes the narrowing part of the contract, so no call site needs a suppression and
+# the rejection message has one definition.
+def _validated_split(split: str) -> Literal["columns", "rows"]:
+    if split == "columns":
+        return "columns"
+    if split == "rows":
+        return "rows"
+    raise ConfigurationError("split must be exactly 'columns' or 'rows'")
+
+
+def _validated_compressor(compressor: str) -> Literal["zlib", "gzip"]:
+    if compressor == "zlib":
+        return "zlib"
+    if compressor == "gzip":
+        return "gzip"
+    raise ConfigurationError("compressor must be exactly 'zlib' or 'gzip'")
+
+
 def _normalization_config(
-    split: str,
+    split: Literal["columns", "rows"],
     delimiter: str,
     encoding: str,
     execution: ExecutionConfig,
 ) -> NormalizationConfig:
     try:
         return NormalizationConfig(
-            split=split,  # type: ignore[arg-type] -- public API validates the string
+            split=split,
             delimiter=delimiter,
             encoding=encoding,
             chunk_rows=execution.csv_chunk_rows,
@@ -118,13 +138,12 @@ def estimate(
     execution: ExecutionConfig | None = None,
 ) -> ResourceEstimate:
     """Inspect exact resource requirements without creating run artifacts."""
-    if split not in ("columns", "rows"):
-        raise ConfigurationError("split must be exactly 'columns' or 'rows'")
+    checked_split = _validated_split(split)
     settings = _execution(execution)
-    _normalization_config(split, delimiter, encoding, settings)
+    _normalization_config(checked_split, delimiter, encoding, settings)
     return preflight(
         csv_path,
-        split=split,  # type: ignore[arg-type] -- validated above
+        split=checked_split,
         delimiter=delimiter,
         encoding=encoding,
         keep_normalized=keep_normalized,
@@ -301,7 +320,7 @@ def _write_failure(
     journal.manifest.update(
         {
             "status": status,
-            "updated_at": _utc_now(),
+            "updated_at": utc_now(),
             "failed_stage": stage,
             "stages": journal.receipts,
         }
@@ -415,14 +434,12 @@ def run(
 ) -> DamicoreResult:
     """Execute, verify, and if possible resume the complete DAMICORE pipeline."""
     settings = _execution(execution)
-    if split not in ("columns", "rows"):
-        raise ConfigurationError("split must be exactly 'columns' or 'rows'")
-    if compressor not in ("zlib", "gzip"):
-        raise ConfigurationError("compressor must be exactly 'zlib' or 'gzip'")
-    normalization_config = _normalization_config(split, delimiter, encoding, settings)
+    checked_split = _validated_split(split)
+    checked_compressor = _validated_compressor(compressor)
+    normalization_config = _normalization_config(checked_split, delimiter, encoding, settings)
     try:
         distance_config = DistanceConfig(
-            compressor=compressor,  # type: ignore[arg-type] -- validated above
+            compressor=checked_compressor,
             compression_level=compression_level,
             compression_chunk_bytes=settings.compression_chunk_bytes,
             workers=settings.effective_workers,
@@ -440,7 +457,7 @@ def run(
     )
     preview = preflight(
         csv_path,
-        split=split,  # type: ignore[arg-type] -- validated above
+        split=checked_split,
         delimiter=delimiter,
         encoding=encoding,
         keep_normalized=keep_normalized,
@@ -509,7 +526,7 @@ def run(
     else:
         run_dir.mkdir(parents=True, exist_ok=True)
 
-    created_at = _utc_now()
+    created_at = utc_now()
     manifest = existing_manifest or {
         "schema_version": SCHEMA_VERSION,
         "damicore_version": VERSION,
@@ -725,8 +742,8 @@ def run(
         manifest.update(
             {
                 "status": "completed",
-                "updated_at": _utc_now(),
-                "completed_at": _utc_now(),
+                "updated_at": utc_now(),
+                "completed_at": utc_now(),
                 "objects": [
                     item.model_dump(mode="json", exclude={"relative_path"})
                     for item in normalization.objects

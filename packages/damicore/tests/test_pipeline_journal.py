@@ -5,6 +5,8 @@ import pytest
 from damicore import ArtifactValidationError, CheckpointMismatchError
 from damicore.pipeline import PipelineJournal
 
+pytestmark = pytest.mark.unit
+
 
 def _manifest(tmp_path):
     run_dir = tmp_path / "run"

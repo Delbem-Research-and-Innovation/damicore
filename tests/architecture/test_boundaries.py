@@ -7,7 +7,10 @@ import damicore_clusterizer
 import damicore_distance
 import damicore_normalizer
 import damicore_tree_builder
+import pytest
 import tomllib
+
+pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).parents[2]
 STAGES = {
@@ -219,3 +222,37 @@ def test_publish_allowlist_matches_the_public_workspace_members():
         and PRIVATE_CLASSIFIER not in _project(directory.name).get("classifiers", [])
     }
     assert set(declared.group(1).split()) == publishable == PUBLIC
+
+
+def test_every_test_module_declares_a_registered_marker():
+    """AGENTS.md requires a registered marker per suite; prose alone lets new files forget.
+
+    The registered set is read from the root configuration rather than restated, so adding a
+    marker there is the only edit needed to make it usable.
+    """
+    configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pytest_options = configuration["tool"]["pytest"]["ini_options"]
+    declared_markers = pytest_options["markers"]
+    assert isinstance(declared_markers, list)
+    registered = {str(entry).split(":", 1)[0].strip() for entry in declared_markers}
+
+    modules = sorted(ROOT.glob("packages/*/tests/test_*.py")) + sorted(
+        ROOT.glob("tests/*/test_*.py")
+    )
+    # Guards the discovery: an empty glob would make every assertion below vacuous.
+    assert len(modules) >= 11, [str(path) for path in modules]
+
+    unmarked: list[str] = []
+    unregistered: list[str] = []
+    for path in modules:
+        found = re.search(
+            r"^pytestmark\s*=\s*pytest\.mark\.(\w+)",
+            path.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if found is None:
+            unmarked.append(str(path.relative_to(ROOT)))
+        elif found.group(1) not in registered:
+            unregistered.append(f"{path.relative_to(ROOT)}:{found.group(1)}")
+    assert not unmarked, unmarked
+    assert not unregistered, unregistered

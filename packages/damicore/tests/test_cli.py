@@ -1,6 +1,10 @@
 import json
 
+import pytest
+
 from damicore.cli import main
+
+pytestmark = pytest.mark.unit
 
 
 def _csv(tmp_path):

@@ -14,6 +14,8 @@ from damicore import (
     run,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _csv(tmp_path):
     path = tmp_path / "input.csv"

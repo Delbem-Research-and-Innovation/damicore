@@ -2,6 +2,8 @@ import pytest
 
 from synthetic_data import generate_csv
 
+pytestmark = pytest.mark.unit
+
 
 def test_generate_csv_is_streaming_and_deterministic(tmp_path):
     first = generate_csv(tmp_path / "first.csv", rows=20, columns=5, clusters=2, seed=17)

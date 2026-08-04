@@ -43,7 +43,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _execution(arguments: argparse.Namespace) -> ExecutionConfig:
+def _execution_from_arguments(arguments: argparse.Namespace) -> ExecutionConfig:
     workers: int | str = arguments.workers if arguments.workers is not None else "auto"
     return ExecutionConfig(
         workers=workers,
@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         "encoding": arguments.encoding,
         "keep_normalized": arguments.keep_normalized,
         "save_diagnostics": arguments.save_diagnostics,
-        "execution": _execution(arguments),
+        "execution": _execution_from_arguments(arguments),
     }
     try:
         if arguments.command == "estimate":

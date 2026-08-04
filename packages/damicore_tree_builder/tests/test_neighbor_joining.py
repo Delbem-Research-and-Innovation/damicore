@@ -6,6 +6,8 @@ import pytest
 from damicore_tree_builder import TreeBuilderError, build_tree, neighbor_joining
 from damicore_tree_builder.newick import to_newick
 
+pytestmark = pytest.mark.unit
+
 
 def test_two_leaf_tree_preserves_half_distance():
     matrix = np.array([[0.0, 4.0], [4.0, 0.0]], dtype=np.float64)

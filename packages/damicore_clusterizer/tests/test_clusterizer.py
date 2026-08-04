@@ -5,6 +5,8 @@ import pytest
 
 from damicore_clusterizer import ClusterConfig, ClusterizerError, cluster_tree
 
+pytestmark = pytest.mark.unit
+
 
 def _tree(tmp_path):
     path = tmp_path / "tree.json"
