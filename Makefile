@@ -1,6 +1,9 @@
-.PHONY: help install check test build clean
+.PHONY: help install check test coverage-critical build clean
 
 PUBLIC_PACKAGES := damicore_normalizer damicore_distance damicore_tree_builder damicore_clusterizer damicore
+
+# Modules held to the specification's 95% critical-coverage floor (section 24.5).
+CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy
 
 help:
 	@echo "Workspace commands:"
@@ -21,6 +24,14 @@ check:
 
 test:
 	uv run pytest --cov --cov-report=term-missing
+	$(MAKE) coverage-critical
+
+coverage-critical:
+	@for module in $(CRITICAL_MODULES); do \
+		echo "coverage-critical: $$module.py >= 95%"; \
+		uv run coverage report --include="*/$$module.py" --fail-under=95 >/dev/null || \
+			{ echo "critical coverage below 95% for $$module.py"; exit 1; }; \
+	done
 
 build:
 	@set -e; for package in $(PUBLIC_PACKAGES); do uv build --package $$package; done

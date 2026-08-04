@@ -28,6 +28,20 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pyright
       - run: uv run pytest --cov --cov-report=xml
+      - name: Enforce critical-module coverage
+        run: make coverage-critical
+
+  architecture:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v6.6.1
+        with:
+          version: "0.8.3"
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv sync --locked --all-packages --group dev
+      - run: uv run pytest tests/architecture
 
   minimum-versions:
     runs-on: ubuntu-24.04
@@ -52,4 +66,15 @@ jobs:
           python-version: "3.12"
           enable-cache: false
       - run: uv sync --locked --all-packages --group dev
-      - run: uv run pytest tests/notebooks -m notebook
+      - name: Build wheels and install damicore into a clean environment
+        run: |
+          mkdir -p dist
+          for package in damicore-normalizer damicore-distance damicore-tree-builder damicore-clusterizer damicore; do
+            uv build --package "$package" --wheel --out-dir dist
+          done
+          uv venv /tmp/damicore-notebook-venv --python 3.12
+          uv pip install --python /tmp/damicore-notebook-venv/bin/python --find-links dist damicore
+      - name: Execute notebook against installed wheels
+        env:
+          DAMICORE_NOTEBOOK_PYTHON: /tmp/damicore-notebook-venv/bin/python
+        run: uv run pytest tests/notebooks -m notebook
