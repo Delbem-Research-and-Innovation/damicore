@@ -79,7 +79,7 @@ def preflight(
         )
     except NormalizerError as exc:
         error_type = CSVFormatError if exc.code == "csv_format_error" else InputValidationError
-        raise error_type(str(exc), code=exc.code) from exc
+        raise error_type(str(exc), code=exc.code, stage="preflight") from exc
     after_scan = path.stat()
     if (before.st_size, before.st_mtime_ns) != (after_scan.st_size, after_scan.st_mtime_ns):
         raise InputValidationError("CSV changed during preflight", code="input_drift")

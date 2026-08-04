@@ -70,7 +70,7 @@ from damicore.manifest import (
     atomic_json,
     sha256_file,
 )
-from damicore.pipeline import PipelineJournal, runtime_fingerprint
+from damicore.pipeline import PipelineJournal, resume_fingerprint, runtime_fingerprint
 from damicore.progress import distance_progress
 from damicore.result import DamicoreResult, RunReport, artifact_paths
 
@@ -211,9 +211,13 @@ def _verify_cross_artifacts(
         membership = list(csv.DictReader(stream))
     membership_ids = [row["object_id"] for row in membership]
     membership_labels = [row["label"] for row in membership]
+    membership_assignment = {row["object_id"]: int(row["cluster"]) for row in membership}
     cluster_items = clusters.clusters
     clustered_ids = [object_id for cluster in cluster_items for object_id in cluster.object_ids]
     cluster_numbers = [cluster.cluster for cluster in cluster_items]
+    clusters_assignment = {
+        object_id: cluster.cluster for cluster in cluster_items for object_id in cluster.object_ids
+    }
     checks = {
         "normalization_to_labels": object_ids == expected_ids and label_values == expected_labels,
         "matrix_shape": matrix.shape == (len(object_ids), len(object_ids)),
@@ -222,6 +226,8 @@ def _verify_cross_artifacts(
         and membership_labels == label_values
         and len(set(membership_ids)) == len(object_ids),
         "clusters": set(clustered_ids) == set(object_ids) and len(clustered_ids) == len(object_ids),
+        "membership_clusters": membership_assignment == clusters_assignment
+        and set(membership_assignment.values()) == set(cluster_numbers),
         "cluster_ids": cluster_numbers == list(range(len(cluster_numbers))),
         "requested_communities": requested_communities is None
         or requested_communities == actual_communities,
@@ -271,6 +277,11 @@ def _write_failure(
 ) -> None:
     status = "interrupted" if interrupted else "failed"
     code = getattr(error, "code", type(error).__name__)
+    error_detail: dict[str, object] = {
+        "error_type": type(error).__name__,
+        "code": str(code),
+        "error_message": str(error),
+    }
     report = RunReport(
         status=status,
         failed_stage=stage,
@@ -284,7 +295,7 @@ def _write_failure(
             name: _stage_seconds(journal, name)
             for name in ("normalizing", "distancing", "tree_building", "clusterizing")
         },
-        error={"code": str(code), "message": str(error)},
+        error=error_detail,
     )
     atomic_json(journal.run_dir / "report.json", report.model_dump(mode="json"))
     journal.manifest.update(
@@ -302,7 +313,7 @@ def _write_failure(
     )
 
 
-def _translated_stage_error(error: Exception) -> DamicoreError:
+def _translated_stage_error(error: Exception, stage: str | None = None) -> DamicoreError:
     code = getattr(error, "code", "")
     if isinstance(error, NormalizerError):
         if code == "output_conflict_error":
@@ -310,9 +321,9 @@ def _translated_stage_error(error: Exception) -> DamicoreError:
         if code == "artifact_validation_error":
             return ArtifactValidationError(str(error), code=code)
         if code == "csv_format_error":
-            return CSVFormatError(str(error), code=code)
+            return CSVFormatError(str(error), code=code, stage=stage)
         if code == "input_drift":
-            return InputValidationError(str(error), code=code)
+            return InputValidationError(str(error), code=code, stage=stage)
         return NormalizationError(str(error), code=code)
     if isinstance(error, DistanceError):
         if code == "checkpoint_mismatch_error":
@@ -463,7 +474,10 @@ def run(
             raise OutputDirectoryConflictError("Completed output reuse is disabled")
         if not settings.resume:
             raise OutputDirectoryConflictError("Incomplete output resume is disabled")
-        if existing_manifest.get("runtime") != runtime_fingerprint():
+        recorded_runtime = existing_manifest.get("runtime")
+        if not isinstance(recorded_runtime, dict) or resume_fingerprint(
+            recorded_runtime
+        ) != resume_fingerprint(runtime_fingerprint()):
             raise CheckpointMismatchError(
                 "Incomplete run was created by a different runtime fingerprint"
             )
@@ -716,7 +730,7 @@ def run(
         _write_failure(journal, preview, current_stage, exc, interrupted=False)
         raise
     except (NormalizerError, DistanceError, TreeBuilderError, ClusterizerError) as exc:
-        translated = _translated_stage_error(exc)
+        translated = _translated_stage_error(exc, current_stage)
         _write_failure(journal, preview, current_stage, translated, interrupted=False)
         logger.error("stage_failed", extra={"run_id": run_id, "stage": current_stage})
         raise translated from exc

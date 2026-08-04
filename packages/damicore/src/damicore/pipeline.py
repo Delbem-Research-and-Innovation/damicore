@@ -16,6 +16,19 @@ from damicore.manifest import PipelineCheckpoint, artifact_record, atomic_json, 
 logger = logging.getLogger(__name__)
 
 
+# Fields whose equality is required to resume an incomplete run (specification 12.2).
+# Deliberately narrower than the full runtime record: environment facts such as the
+# platform string or sibling-package builds must not spuriously block a valid resume.
+RESUME_FINGERPRINT_KEYS = (
+    "damicore",
+    "python",
+    "numpy",
+    "igraph",
+    "zlib_build",
+    "zlib_runtime",
+)
+
+
 def runtime_fingerprint() -> dict[str, str]:
     packages = (
         "damicore",
@@ -34,11 +47,19 @@ def runtime_fingerprint() -> dict[str, str]:
         "python": platform.python_version(),
         "platform": platform.platform(),
         "numpy": version("numpy"),
+        "pandas": version("pandas"),
+        "pydantic": version("pydantic"),
         "igraph": version("igraph"),
+        "tqdm": version("tqdm"),
         "zlib_build": zlib.ZLIB_VERSION,
         "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
         **versions,
     }
+
+
+def resume_fingerprint(fingerprint: dict[str, str]) -> dict[str, str]:
+    """Project the resume-compatibility subset from a full runtime record."""
+    return {key: fingerprint[key] for key in RESUME_FINGERPRINT_KEYS if key in fingerprint}
 
 
 class PipelineJournal:
@@ -48,7 +69,9 @@ class PipelineJournal:
         self.checkpoint_path = run_dir / "checkpoints" / "pipeline.json"
         self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         self.manifest = manifest
+        self.run_id = str(manifest.get("run_id", ""))
         self.runtime = runtime_fingerprint()
+        self._resume_identity = resume_fingerprint(self.runtime)
         if self.checkpoint_path.exists():
             try:
                 checkpoint = PipelineCheckpoint.model_validate_json(
@@ -56,7 +79,10 @@ class PipelineJournal:
                 )
             except (OSError, ValidationError) as exc:
                 raise CheckpointMismatchError("Pipeline checkpoint is unreadable") from exc
-            if checkpoint.schema_version != 1 or checkpoint.runtime != self.runtime:
+            if (
+                checkpoint.schema_version != 1
+                or resume_fingerprint(checkpoint.runtime) != self._resume_identity
+            ):
                 raise CheckpointMismatchError("Runtime fingerprint differs from checkpoint")
             self.receipts: dict[str, Any] = {
                 stage: receipt.model_dump(mode="json")
@@ -83,7 +109,7 @@ class PipelineJournal:
         atomic_json(self.manifest_path, self.manifest)
 
     def stage_started(self, stage: str, inputs: list[Path]) -> float:
-        logger.info("stage_started", extra={"stage": stage})
+        logger.info("stage_started", extra={"run_id": self.run_id, "stage": stage})
         started = time.monotonic()
         self.receipts[stage] = {
             "status": "running",
@@ -117,13 +143,14 @@ class PipelineJournal:
         self._write_checkpoint()
         self.manifest["stages"] = self.receipts
         atomic_json(self.manifest_path, self.manifest)
-        logger.info("stage_completed", extra={"stage": stage, **metrics})
+        logger.info("stage_completed", extra={"run_id": self.run_id, "stage": stage, **metrics})
 
     def reusable(self, stage: str) -> bool:
         receipt = self.receipts.get(stage)
         if not isinstance(receipt, dict) or receipt.get("status") != "completed":
             return False
-        if receipt.get("runtime") != self.runtime:
+        recorded = receipt.get("runtime")
+        if not isinstance(recorded, dict) or resume_fingerprint(recorded) != self._resume_identity:
             raise CheckpointMismatchError(f"Runtime changed for stage {stage}")
         outputs = receipt.get("outputs")
         if not isinstance(outputs, list) or not outputs:
@@ -136,7 +163,7 @@ class PipelineJournal:
                 or sha256_file(path) != record.get("sha256")
             ):
                 raise ArtifactValidationError(f"Reusable output is corrupt: {path.name}")
-        logger.info("artifact_reused", extra={"stage": stage})
+        logger.info("artifact_reused", extra={"run_id": self.run_id, "stage": stage})
         return True
 
     def _record(self, path: Path) -> dict[str, object]:

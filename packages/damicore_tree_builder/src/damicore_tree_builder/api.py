@@ -85,6 +85,12 @@ def build_tree(
     validated = Tree.model_validate_json(tree_path.read_text(encoding="utf-8"))
     if len([node for node in validated.nodes if node.kind == "leaf"]) != len(labels):
         raise TreeBuilderError("Persisted tree lost leaves", code="artifact_validation_error")
+    newick = newick_path.read_text(encoding="utf-8")
+    if not newick.rstrip("\n").endswith(";") or newick.count(";") != 1:
+        raise TreeBuilderError(
+            "Persisted Newick artifact is malformed",
+            code="artifact_validation_error",
+        )
     negative = sum(edge.length < 0 for edge in tree.edges)
     del workspace
     workspace_path.unlink()
