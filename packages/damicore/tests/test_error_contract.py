@@ -11,6 +11,7 @@ human-facing surface that may be reworded; the per-stage suites match them only 
 are the sole way to tell two violations of the same contract apart.
 """
 
+import pytest
 from damicore_clusterizer import ClusterizerError
 from damicore_distance import DistanceError
 from damicore_normalizer import NormalizerError
@@ -19,6 +20,8 @@ from damicore_tree_builder import TreeBuilderError
 from damicore import errors as error_module
 from damicore.api import _PRESERVED_CODES, _STAGE_TRANSLATIONS, _translated_stage_error
 from damicore.errors import DamicoreError, _default_code
+
+pytestmark = pytest.mark.unit
 
 STAGE_BASES = {
     NormalizerError: "normalizer_error",

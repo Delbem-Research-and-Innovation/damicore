@@ -19,6 +19,7 @@ import importlib
 import pathlib
 import sysconfig
 import tempfile
+from typing import cast
 
 CSV = "a,b,c,d\n1,4,7,9\n2,5,8,1\n3,6,2,4\n1,4,7,8\n"
 
@@ -40,11 +41,20 @@ def check_public_surface(name: str) -> None:
             f"{[str(root) for root in INSTALL_ROOTS]}"
         )
 
-    exported = getattr(module, "__all__", None)
-    if not isinstance(exported, list) or not exported:
-        raise AssertionError(
-            f"{name}.__all__ must be a non-empty list, got {exported!r}"
-        )
+    # A module attribute carries no static type, so validate the shape rather than trust it:
+    # __all__ must be a non-empty list of names, which is also what the contract claims.
+    declared: object = getattr(module, "__all__", None)
+    if not isinstance(declared, list):
+        raise TypeError(f"{name}.__all__ must be a list, got {declared!r}")
+    # isinstance narrows only to list[Unknown]; this cast carries no unchecked premise, because
+    # the list check above established it and every entry is validated individually below.
+    exported: list[str] = []
+    for entry in cast(list[object], declared):
+        if not isinstance(entry, str):
+            raise TypeError(f"{name}.__all__ must hold only names, got {entry!r}")
+        exported.append(entry)
+    if not exported:
+        raise AssertionError(f"{name}.__all__ must not be empty")
     missing = [symbol for symbol in exported if not hasattr(module, symbol)]
     if missing:
         raise AssertionError(f"{name}.__all__ exports unresolvable names: {missing}")
