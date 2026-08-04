@@ -20,9 +20,17 @@ jobs:
       - uses: actions/checkout@v4.2.2
       - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.8.3"
+          version: "0.12.1"
           python-version: ${{ matrix.python }}
           enable-cache: false
+      - name: Reject pre-release interpreters
+        # An outdated uv silently resolves a minor version to a release candidate when it
+        # knows no final build. Runtime dependencies target final CPython releases, so that
+        # substitution fails deep inside dependency internals instead of here.
+        run: >
+          uv run --no-project python -c
+          "import sys; assert sys.version_info.releaselevel == 'final',
+          f'pre-release interpreter rejected: {sys.version}'"
       - run: uv sync --locked --all-packages --group dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -37,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4.2.2
       - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.8.3"
+          version: "0.12.1"
           python-version: "3.12"
           enable-cache: false
       - run: uv sync --locked --all-packages --group dev
@@ -49,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4.2.2
       - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.8.3"
+          version: "0.12.1"
           python-version: "3.11"
           enable-cache: false
       - run: uv lock --resolution lowest-direct
@@ -62,7 +70,7 @@ jobs:
       - uses: actions/checkout@v4.2.2
       - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.8.3"
+          version: "0.12.1"
           python-version: "3.12"
           enable-cache: false
       - run: uv sync --locked --all-packages --group dev
