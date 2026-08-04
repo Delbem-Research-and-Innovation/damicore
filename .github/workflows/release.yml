@@ -53,15 +53,23 @@ jobs:
           packages-dir: dist
           attestations: false
 
+      # The last gate before the irreversible publish, and the only one that exercises what
+      # a user actually installs rather than a local build of it.
       - name: Smoke the TestPyPI publication
+        env:
+          SMOKE_VENV: /tmp/damicore-release-smoke
+          DAMICORE_NOTEBOOK_KERNEL: damicore-release
         run: |
-          uv venv /tmp/damicore-release-smoke --python 3.12
-          uv pip install --python /tmp/damicore-release-smoke/bin/python \
+          uv venv "$SMOKE_VENV" --python 3.12
+          uv pip install --python "$SMOKE_VENV/bin/python" \
             --index-url https://test.pypi.org/simple \
-            --extra-index-url https://pypi.org/simple "damicore==$VERSION"
-          /tmp/damicore-release-smoke/bin/damicore --help
-          /tmp/damicore-release-smoke/bin/python .github/scripts/wheel_smoke.py \
+            --extra-index-url https://pypi.org/simple "damicore==$VERSION" ipykernel
+          "$SMOKE_VENV/bin/damicore" --help
+          "$SMOKE_VENV/bin/python" .github/scripts/wheel_smoke.py \
             --pipeline $(printf -- '--package %s ' $PUBLIC_PACKAGES)
+          "$SMOKE_VENV/bin/python" -m ipykernel install --user \
+            --name "$DAMICORE_NOTEBOOK_KERNEL" --display-name "$DAMICORE_NOTEBOOK_KERNEL"
+          uv run pytest tests/notebooks -m notebook
 
       # The same artifacts built above; nothing is rebuilt between the two indexes.
       - name: Publish the same artifacts to PyPI
