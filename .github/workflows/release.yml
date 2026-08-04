@@ -8,56 +8,68 @@ permissions:
   contents: write
   id-token: write
 
+# Never cancel a release: a partially published version cannot be retracted.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     environment: release
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: false
-      - run: uv sync --locked --all-packages --group dev
-      - name: Verify lockstep tag
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+
+      - name: Resolve the tagged version and the publish allowlist
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          for package in damicore_normalizer damicore_distance damicore_tree_builder damicore_clusterizer damicore; do
-            test "$(uv run python -c "import tomllib; print(tomllib.load(open('packages/$package/pyproject.toml','rb'))['project']['version'])")" = "$version"
-          done
-      - name: Run the full core gate on the tagged commit
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "PUBLIC_PACKAGES=$(make -s print-public-packages)" >> "$GITHUB_ENV"
+
+      # Specification section 25.4, step 2. The gate is the same one CI runs, by construction.
+      - run: make check
+      - run: make test
+
+      # Specification section 25.4, step 1, checked against the artifacts that will be
+      # published rather than against the sources they came from. verify-dist rejects a
+      # version that any distribution disagrees on, so lockstep and tag agreement are one
+      # assertion instead of a loop over the five pyproject files.
+      - name: Build once and verify against the tag
         run: |
-          uv run ruff check .
-          uv run ruff format --check .
-          uv run pyright
-          uv run pytest --cov
-          make coverage-critical
-      - name: Build once
-        run: |
-          mkdir -p dist
-          for package in damicore-normalizer damicore-distance damicore-tree-builder damicore-clusterizer damicore; do
-            uv build --package "$package" --out-dir dist
-          done
+          make build
           sha256sum dist/* > SHA256SUMS
-      - run: uv run twine check dist/*.whl dist/*.tar.gz
+          uv run python .github/scripts/verify_dist.py \
+            --dist dist --expect-version "$VERSION" -- $PUBLIC_PACKAGES
+
+      - run: uv run twine check dist/*
+
       - name: Publish exact artifacts to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1.13.0
         with:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: dist
           attestations: false
-      - name: Smoke TestPyPI publication
+
+      - name: Smoke the TestPyPI publication
         run: |
           uv venv /tmp/damicore-release-smoke --python 3.12
-          version="${GITHUB_REF_NAME#v}"
-          uv pip install --python /tmp/damicore-release-smoke/bin/python --index-url https://test.pypi.org/simple --extra-index-url https://pypi.org/simple "damicore==$version"
+          uv pip install --python /tmp/damicore-release-smoke/bin/python \
+            --index-url https://test.pypi.org/simple \
+            --extra-index-url https://pypi.org/simple "damicore==$VERSION"
           /tmp/damicore-release-smoke/bin/damicore --help
+          /tmp/damicore-release-smoke/bin/python .github/scripts/wheel_smoke.py \
+            --pipeline $(printf -- '--package %s ' $PUBLIC_PACKAGES)
+
+      # The same artifacts built above; nothing is rebuilt between the two indexes.
       - name: Publish the same artifacts to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1.13.0
         with:
           packages-dir: dist
           attestations: false
+
       - uses: softprops/action-gh-release@v2.3.2
         with:
           body_path: CHANGELOG.md

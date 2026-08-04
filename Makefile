@@ -1,17 +1,29 @@
-.PHONY: help install check test coverage-critical build clean
+.PHONY: help install check test coverage-critical build wheels clean
+.PHONY: print-public-packages print-stage-packages
 
+# The publish allowlist. Deliberately explicit rather than derived from the workspace, so a
+# new package cannot become publishable by accident. tests/architecture asserts this list
+# matches the workspace members that are not marked private.
 PUBLIC_PACKAGES := damicore_normalizer damicore_distance damicore_tree_builder damicore_clusterizer damicore
+
+# The four stage packages, which own one pipeline stage each and must install alone.
+STAGE_PACKAGES := $(filter-out damicore,$(PUBLIC_PACKAGES))
 
 # Modules held to the specification's 95% critical-coverage floor (section 24.5).
 CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy
 
+DIST_DIR ?= dist
+
 help:
 	@echo "Workspace commands:"
-	@echo "  install  Install all workspace dependencies and git hooks"
-	@echo "  check    Lint and type-check the workspace"
-	@echo "  test     Run all tests with coverage gates"
-	@echo "  build    Build the five public distributions"
-	@echo "  clean    Remove build artifacts and the shared .venv"
+	@echo "  install               Install all workspace dependencies and git hooks"
+	@echo "  check                 Lint and type-check the workspace"
+	@echo "  test                  Run all tests with coverage gates"
+	@echo "  build                 Build sdist and wheel of the five public distributions"
+	@echo "  wheels                Build wheels only, for the smoke lanes"
+	@echo "  print-public-packages Print the publish allowlist"
+	@echo "  print-stage-packages  Print the allowlist without the orchestrator"
+	@echo "  clean                 Remove build artifacts and the shared .venv"
 
 install:
 	uv sync --all-packages --group dev
@@ -34,7 +46,18 @@ coverage-critical:
 	done
 
 build:
-	@set -e; for package in $(PUBLIC_PACKAGES); do uv build --package $$package; done
+	@set -e; mkdir -p $(DIST_DIR); \
+	for package in $(PUBLIC_PACKAGES); do uv build --package $$package --out-dir $(DIST_DIR); done
+
+wheels:
+	@set -e; mkdir -p $(DIST_DIR); \
+	for package in $(PUBLIC_PACKAGES); do uv build --package $$package --wheel --out-dir $(DIST_DIR); done
+
+print-public-packages:
+	@echo $(PUBLIC_PACKAGES)
+
+print-stage-packages:
+	@echo $(STAGE_PACKAGES)
 
 clean:
 	@echo "Remove .venv, dist, coverage, and test caches explicitly when needed."

@@ -1,0 +1,57 @@
+name: Set up the uv workspace
+description: >
+  Installs the pinned uv toolchain, rejects pre-release interpreters, and optionally
+  synchronizes the workspace from the committed lock. This is the single source of truth
+  for the CI toolchain pins required by specification section 8.5.
+
+inputs:
+  python-version:
+    description: CPython version uv must provide.
+    required: false
+    default: "3.12"
+  sync:
+    description: >
+      "locked" installs the workspace from the committed uv.lock. "none" leaves resolution
+      to the caller, for the lanes that deliberately re-resolve dependencies.
+    required: false
+    default: locked
+
+runs:
+  using: composite
+  steps:
+    - name: Reject an unknown sync mode
+      shell: bash
+      env:
+        SYNC: ${{ inputs.sync }}
+      run: |
+        case "$SYNC" in
+          locked | none) ;;
+          *)
+            echo "sync must be 'locked' or 'none', got '$SYNC'" >&2
+            exit 1
+            ;;
+        esac
+
+    - uses: astral-sh/setup-uv@v6.6.1
+      with:
+        version: "0.12.1"
+        python-version: ${{ inputs.python-version }}
+        enable-cache: true
+        # The uv cache is content-addressed, so restoring it cannot change a resolution.
+        # Keying on the lock keeps the re-resolving lanes on a cold-but-correct cache.
+        cache-dependency-glob: uv.lock
+
+    - name: Reject pre-release interpreters
+      # An outdated uv silently resolves a minor version to a release candidate when it
+      # knows no final build. Runtime dependencies target final CPython releases, so that
+      # substitution fails deep inside dependency internals instead of here.
+      shell: bash
+      run: >
+        uv run --no-project python -c
+        "import sys; assert sys.version_info.releaselevel == 'final',
+        f'pre-release interpreter rejected: {sys.version}'"
+
+    - name: Synchronize the workspace from the lock
+      if: inputs.sync == 'locked'
+      shell: bash
+      run: uv sync --locked --all-packages --group dev

@@ -1,4 +1,5 @@
 import ast
+import re
 from pathlib import Path
 
 import damicore
@@ -15,6 +16,31 @@ STAGES = {
     "damicore_tree_builder",
     "damicore_clusterizer",
 }
+PUBLIC = STAGES | {"damicore"}
+
+# A workspace member carrying this classifier is private test infrastructure and must never
+# be published (specification section 9.3).
+PRIVATE_CLASSIFIER = "Private :: Do Not Upload"
+
+
+def _project(package: str) -> dict[str, object]:
+    with (ROOT / "packages" / package / "pyproject.toml").open("rb") as stream:
+        return tomllib.load(stream)["project"]
+
+
+def _version(package: str) -> str:
+    return str(_project(package)["version"])
+
+
+def _dependencies(package: str) -> set[str]:
+    declared = _project(package)["dependencies"]
+    assert isinstance(declared, list)
+    return {str(dependency) for dependency in declared}
+
+
+def _release(version: str) -> tuple[int, int, int]:
+    major, minor, patch = version.split(".")
+    return int(major), int(minor), int(patch)
 
 
 def _imports(path: Path) -> set[str]:
@@ -104,7 +130,7 @@ def test_public_exports_are_exact():
 
 
 def test_public_pyprojects_contain_no_workspace_paths_or_typer():
-    for package in sorted(STAGES | {"damicore"}):
+    for package in sorted(PUBLIC):
         text = (ROOT / "packages" / package / "pyproject.toml").read_text(
             encoding="utf-8"
         )
@@ -114,7 +140,8 @@ def test_public_pyprojects_contain_no_workspace_paths_or_typer():
         assert "file://" not in text
 
 
-def test_runtime_dependencies_and_versions_are_exact():
+def test_third_party_runtime_dependencies_are_exact():
+    """Specification section 8.2 closes the runtime dependency set and its ranges."""
     expected = {
         "damicore_normalizer": {"pandas>=2.2,<4", "pydantic>=2.10,<3"},
         "damicore_distance": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
@@ -124,19 +151,71 @@ def test_runtime_dependencies_and_versions_are_exact():
             "numpy>=1.26,<3",
             "pydantic>=2.10,<3",
         },
-        "damicore": {
-            "damicore-normalizer>=0.1.0,<0.2.0",
-            "damicore-distance>=0.1.0,<0.2.0",
-            "damicore-tree-builder>=0.1.0,<0.2.0",
-            "damicore-clusterizer>=0.1.0,<0.2.0",
-            "pandas>=2.2,<4",
-            "pydantic>=2.10,<3",
-            "tqdm>=4.66,<5",
-        },
+        "damicore": {"pandas>=2.2,<4", "pydantic>=2.10,<3", "tqdm>=4.66,<5"},
     }
     for package, dependencies in expected.items():
-        with (ROOT / "packages" / package / "pyproject.toml").open("rb") as stream:
-            project = tomllib.load(stream)["project"]
-        assert project["version"] == "0.1.0"
-        assert project["requires-python"] == ">=3.11,<3.15"
-        assert set(project["dependencies"]) == dependencies
+        third_party = {
+            dependency
+            for dependency in _dependencies(package)
+            if not dependency.startswith("damicore-")
+        }
+        assert third_party == dependencies, package
+
+
+def test_public_packages_declare_one_lockstep_version():
+    """Specification section 26: the five published distributions share one version."""
+    versions = {package: _version(package) for package in sorted(PUBLIC)}
+    assert len(set(versions.values())) == 1, versions
+    assert re.fullmatch(r"\d+\.\d+\.\d+", versions["damicore"]), versions["damicore"]
+
+
+def test_orchestrator_pins_every_stage_within_the_lockstep_minor():
+    """A published damicore must resolve stage packages of its own compatible release.
+
+    The bound is asserted relative to the declared version rather than against a literal,
+    so a release bump does not have to be mirrored here.
+    """
+    version = _version("damicore")
+    major, minor, _ = _release(version)
+    # Specification section 26: during 0.x an incompatible change increments the minor, so
+    # the compatible range is capped at the next minor rather than the next major.
+    ceiling = f"<{major}.{minor + 1}.0"
+
+    pinned: dict[str, str] = {}
+    for dependency in _dependencies("damicore"):
+        if not dependency.startswith("damicore-"):
+            continue
+        name, _, specifier = dependency.partition(">=")
+        floor, _, cap = specifier.partition(",")
+        assert cap == ceiling, dependency
+        assert _release(floor) <= _release(version), dependency
+        pinned[name] = dependency
+
+    assert set(pinned) == {stage.replace("_", "-") for stage in STAGES}
+
+
+def test_public_packages_support_the_specified_interpreter_range():
+    for package in sorted(PUBLIC):
+        assert _project(package)["requires-python"] == ">=3.11,<3.15"
+
+
+def test_publish_allowlist_matches_the_public_workspace_members():
+    """The Makefile allowlist is what CI builds; drifting from the workspace is a defect.
+
+    Keeping the allowlist explicit means a new package cannot become publishable by
+    accident; this test means it also cannot be silently forgotten.
+    """
+    declared = re.search(
+        r"^PUBLIC_PACKAGES\s*:=\s*(.+)$",
+        (ROOT / "Makefile").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert declared is not None, "Makefile declares no PUBLIC_PACKAGES"
+
+    publishable = {
+        directory.name
+        for directory in (ROOT / "packages").iterdir()
+        if (directory / "pyproject.toml").is_file()
+        and PRIVATE_CLASSIFIER not in _project(directory.name).get("classifiers", [])
+    }
+    assert set(declared.group(1).split()) == publishable == PUBLIC

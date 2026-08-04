@@ -9,80 +9,78 @@ on:
 permissions:
   contents: read
 
+# Supersede a pull request's own earlier runs; never discard a run that verified main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Specification section 25.1, jobs 1 to 3. Lint and types are interpreter-independent:
+  # pyrightconfig.json pins pythonVersion, so running these once is the whole signal.
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+      - run: make check
+
+  # Specification section 25.1, jobs 4 and 6. `make test` runs the whole suite, so the
+  # import-architecture tests are covered on every interpreter rather than once.
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.12.1"
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+        with:
           python-version: ${{ matrix.python }}
-          enable-cache: false
-      - name: Reject pre-release interpreters
-        # An outdated uv silently resolves a minor version to a release candidate when it
-        # knows no final build. Runtime dependencies target final CPython releases, so that
-        # substitution fails deep inside dependency internals instead of here.
-        run: >
-          uv run --no-project python -c
-          "import sys; assert sys.version_info.releaselevel == 'final',
-          f'pre-release interpreter rejected: {sys.version}'"
-      - run: uv sync --locked --all-packages --group dev
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pyright
-      - run: uv run pytest --cov --cov-report=xml
-      - name: Enforce critical-module coverage
-        run: make coverage-critical
+      - run: make test
 
-  architecture:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: astral-sh/setup-uv@v6.6.1
-        with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: false
-      - run: uv sync --locked --all-packages --group dev
-      - run: uv run pytest tests/architecture
-
+  # Specification section 25.1, job 5. Resolves the floor of every declared range, so it
+  # must not install from the committed lock.
   minimum-versions:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.12.1"
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+        with:
           python-version: "3.11"
-          enable-cache: false
+          sync: none
       - run: uv lock --resolution lowest-direct
       - run: uv sync --all-packages --group dev
       - run: uv run pytest -m "not slow"
 
+  # Specification sections 24.3 and 25.1, job 7. The notebook must execute cell by cell in
+  # a kernel that only knows the built wheels, so a missing dependency or a broken public
+  # symbol fails here rather than for a Colab user.
   notebook:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      WHEEL_VENV: /tmp/damicore-notebook-venv
+      DAMICORE_NOTEBOOK_KERNEL: damicore-wheels
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: false
-      - run: uv sync --locked --all-packages --group dev
-      - name: Build wheels and install damicore into a clean environment
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+      - name: Install damicore from wheels and register its kernel
         run: |
-          mkdir -p dist
-          for package in damicore-normalizer damicore-distance damicore-tree-builder damicore-clusterizer damicore; do
-            uv build --package "$package" --wheel --out-dir dist
-          done
-          uv venv /tmp/damicore-notebook-venv --python 3.12
-          uv pip install --python /tmp/damicore-notebook-venv/bin/python --find-links dist damicore
-      - name: Execute notebook against installed wheels
-        env:
-          DAMICORE_NOTEBOOK_PYTHON: /tmp/damicore-notebook-venv/bin/python
-        run: uv run pytest tests/notebooks -m notebook
+          make wheels
+          uv venv "$WHEEL_VENV" --python 3.12
+          uv pip install --python "$WHEEL_VENV/bin/python" --find-links dist damicore ipykernel
+          "$WHEEL_VENV/bin/python" -m ipykernel install --user \
+            --name "$DAMICORE_NOTEBOOK_KERNEL" --display-name "$DAMICORE_NOTEBOOK_KERNEL"
+      - run: uv run pytest tests/notebooks -m notebook

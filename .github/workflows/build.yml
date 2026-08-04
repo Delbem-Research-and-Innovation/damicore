@@ -9,84 +9,70 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Specification section 25.2. The notebook smoke deliberately lives in ci.yml only; both
+  # lanes installed the same wheel closure, so running it twice bought no signal.
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: false
-      - run: uv sync --locked --all-packages --group dev
-      - name: Build explicit public allowlist
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+
+      - name: Build the publish allowlist and export it to later steps
         run: |
-          mkdir -p dist
-          for package in damicore-normalizer damicore-distance damicore-tree-builder damicore-clusterizer damicore; do
-            uv build --package "$package" --out-dir dist
-          done
+          echo "PUBLIC_PACKAGES=$(make -s print-public-packages)" >> "$GITHUB_ENV"
+          echo "STAGE_PACKAGES=$(make -s print-stage-packages)" >> "$GITHUB_ENV"
+          make build
+
       - run: uv run twine check dist/*
       - run: uv run pip-audit
-      - name: Reject workspace paths and unexpected distributions
+
+      - name: Verify the distribution contract
+        run: uv run python .github/scripts/verify_dist.py --dist dist -- $PUBLIC_PACKAGES
+
+      - name: Smoke each stage wheel in isolation
+        # Installed alone, so an undeclared runtime dependency cannot be satisfied by a
+        # sibling package that happens to be present.
         run: |
-          test "$(find dist -name '*.whl' | wc -l)" -eq 5
-          test "$(find dist -name '*.tar.gz' | wc -l)" -eq 5
-          for wheel in dist/*.whl; do unzip -p "$wheel" '*/METADATA'; done > /tmp/all-metadata.txt
-          ! grep -E 'file:|workspace|packages/' /tmp/all-metadata.txt
-          ! find dist -iname '*synthetic*' | grep .
-      - name: Isolated stage wheel smoke
-        run: |
-          for package in damicore_normalizer damicore_distance damicore_tree_builder damicore_clusterizer; do
-            uv venv "/tmp/$package-venv" --python 3.12
-            uv pip install --python "/tmp/$package-venv/bin/python" "$(find dist -name "$package-*.whl")"
-            "/tmp/$package-venv/bin/python" -c "import $package; assert $package.__all__"
+          set -e
+          for package in $STAGE_PACKAGES; do
+            venv="/tmp/$package-venv"
+            uv venv "$venv" --python 3.12
+            uv pip install --python "$venv/bin/python" "$(find dist -name "$package-*.whl")"
+            "$venv/bin/python" .github/scripts/wheel_smoke.py --package "$package"
           done
-      - name: Isolated aggregate wheel smoke
+
+      - name: Smoke the five built wheels together
+        # Installed by path, so this asserts the artifacts just built coexist and import,
+        # with no chance of an index serving a same-version package instead.
         run: |
-          uv venv /tmp/damicore-wheel-venv --python 3.12
-          uv pip install --python /tmp/damicore-wheel-venv/bin/python dist/*.whl
-          /tmp/damicore-wheel-venv/bin/python -c "import damicore, damicore_normalizer, damicore_distance, damicore_tree_builder, damicore_clusterizer"
-      - name: Install only damicore and run end-to-end
+          uv venv /tmp/damicore-wheels-venv --python 3.12
+          uv pip install --python /tmp/damicore-wheels-venv/bin/python dist/*.whl
+          /tmp/damicore-wheels-venv/bin/python .github/scripts/wheel_smoke.py \
+            $(printf -- '--package %s ' $PUBLIC_PACKAGES)
+
+      - name: Install only damicore and run end to end
+        # A separate assertion from the step above: that damicore's declared dependency
+        # closure is complete and satisfiable on its own, and that its entry point works.
         run: |
           uv venv /tmp/damicore-e2e-venv --python 3.12
           uv pip install --python /tmp/damicore-e2e-venv/bin/python --find-links dist damicore
-          /tmp/damicore-e2e-venv/bin/python -c '
-          import tempfile, pathlib
-          from damicore import run, load_result, ExecutionConfig
-          directory = pathlib.Path(tempfile.mkdtemp())
-          csv = directory / "dataset.csv"
-          csv.write_text("a,b,c,d\n1,4,7,9\n2,5,8,1\n3,6,2,4\n1,4,7,8\n", encoding="utf-8")
-          result = run(str(csv), output_dir=str(directory / "run"), progress=False,
-                       execution=ExecutionConfig(workers=1))
-          assert result.report.status == "completed"
-          assert list(result.membership.columns) == ["object_id", "label", "cluster"]
-          result.close()
-          assert load_result(str(directory / "run")).report.status == "completed"
-          print("aggregate e2e OK")
-          '
-      - name: Compare logical wheel contents after rebuild
+          /tmp/damicore-e2e-venv/bin/damicore --help
+          /tmp/damicore-e2e-venv/bin/python .github/scripts/wheel_smoke.py --pipeline
+
+      - name: Verify the wheels rebuild identically
         run: |
-          mkdir -p /tmp/rebuilt
-          for package in damicore-normalizer damicore-distance damicore-tree-builder damicore-clusterizer damicore; do
-            uv build --package "$package" --wheel --out-dir /tmp/rebuilt
-          done
-          uv run python - <<'PY'
-          from pathlib import Path
-          from zipfile import ZipFile
+          DIST_DIR=/tmp/rebuilt make wheels
+          uv run python .github/scripts/verify_dist.py \
+            --dist dist --rebuilt /tmp/rebuilt -- $PUBLIC_PACKAGES
 
-          def contents(path):
-              with ZipFile(path) as archive:
-                  return {name: archive.read(name) for name in archive.namelist()}
-
-          for original in Path("dist").glob("*.whl"):
-              rebuilt = Path("/tmp/rebuilt") / original.name
-              assert contents(original) == contents(rebuilt), original.name
-          PY
-      - name: Execute notebook against installed wheels
-        env:
-          DAMICORE_NOTEBOOK_PYTHON: /tmp/damicore-wheel-venv/bin/python
-        run: uv run pytest tests/notebooks -m notebook
       - uses: actions/upload-artifact@v4.6.2
         with:
           name: distributions
