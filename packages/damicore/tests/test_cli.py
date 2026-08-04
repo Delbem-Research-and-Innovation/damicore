@@ -53,6 +53,15 @@ def test_cli_run_and_typed_error_codes(tmp_path, capsys):
     assert json.loads(capsys.readouterr().err)["code"] == "resource_limit_error"
 
 
+def test_cli_envelope_reports_the_public_code_of_a_translated_stage_failure(tmp_path, capsys):
+    """Specification sections 19 and 20: the envelope carries the public code, not the
+    stage's internal one, and the exit status follows the translated class."""
+    source = tmp_path / "duplicate.csv"
+    source.write_text("a,a\n1,2\n", encoding="utf-8")
+    assert main(["run", str(source), "--no-progress", "--output-dir", str(tmp_path / "out")]) == 2
+    assert json.loads(capsys.readouterr().err)["code"] == "csv_format_error"
+
+
 def test_cli_interrupt_exit_code(monkeypatch, tmp_path):
     def interrupted(**_kwargs):
         raise KeyboardInterrupt

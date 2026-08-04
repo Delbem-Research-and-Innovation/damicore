@@ -313,45 +313,69 @@ def _write_failure(
     )
 
 
+# How a stage failure becomes a public failure: the stage's own base error selects the row,
+# its code selects the class, and an unmapped code falls back to the stage's generic class.
+_STAGE_TRANSLATIONS: tuple[
+    tuple[type[Exception], dict[str, type[DamicoreError]], type[DamicoreError]], ...
+] = (
+    (
+        NormalizerError,
+        {
+            "output_conflict_error": OutputDirectoryConflictError,
+            "artifact_validation_error": ArtifactValidationError,
+            "csv_format_error": CSVFormatError,
+            "input_drift": InputValidationError,
+        },
+        NormalizationError,
+    ),
+    (
+        DistanceError,
+        {
+            "checkpoint_mismatch_error": CheckpointMismatchError,
+            "output_directory_conflict_error": OutputDirectoryConflictError,
+            "artifact_validation_error": ArtifactValidationError,
+            "compression_error": CompressionError,
+            "distance_matrix_validation_error": DistanceMatrixValidationError,
+        },
+        DistanceComputationError,
+    ),
+    (
+        TreeBuilderError,
+        {
+            "output_directory_conflict_error": OutputDirectoryConflictError,
+            "artifact_validation_error": ArtifactValidationError,
+            "tree_format_error": TreeFormatError,
+        },
+        TreeBuildError,
+    ),
+    (
+        ClusterizerError,
+        {
+            "output_directory_conflict_error": OutputDirectoryConflictError,
+            "tree_format_error": TreeFormatError,
+        },
+        ClusterizationError,
+    ),
+)
+
+# Specification section 19 defines a public code as the class name in snake_case, which
+# DamicoreError already derives. A stage code must therefore never be forwarded, or the
+# public code would report the stage's internal vocabulary instead of the raised class.
+# input_drift is that section's single sanctioned specialization.
+_PRESERVED_CODES = frozenset({"input_drift"})
+
+
 def _translated_stage_error(error: Exception, stage: str | None = None) -> DamicoreError:
-    code = getattr(error, "code", "")
-    if isinstance(error, NormalizerError):
-        if code == "output_conflict_error":
-            return OutputDirectoryConflictError(str(error), code=code)
-        if code == "artifact_validation_error":
-            return ArtifactValidationError(str(error), code=code)
-        if code == "csv_format_error":
-            return CSVFormatError(str(error), code=code, stage=stage)
-        if code == "input_drift":
-            return InputValidationError(str(error), code=code, stage=stage)
-        return NormalizationError(str(error), code=code)
-    if isinstance(error, DistanceError):
-        if code == "checkpoint_mismatch_error":
-            return CheckpointMismatchError(str(error), code=code)
-        if code == "output_directory_conflict_error":
-            return OutputDirectoryConflictError(str(error), code=code)
-        if code == "artifact_validation_error":
-            return ArtifactValidationError(str(error), code=code)
-        if code == "compression_error":
-            return CompressionError(str(error), code=code)
-        if code == "distance_matrix_validation_error":
-            return DistanceMatrixValidationError(str(error), code=code)
-        return DistanceComputationError(str(error), code=code)
-    if isinstance(error, TreeBuilderError):
-        if code == "output_directory_conflict_error":
-            return OutputDirectoryConflictError(str(error), code=code)
-        if code == "artifact_validation_error":
-            return ArtifactValidationError(str(error), code=code)
-        if code == "tree_format_error":
-            return TreeFormatError(str(error), code=code)
-        return TreeBuildError(str(error), code=code)
-    if isinstance(error, ClusterizerError):
-        if code == "output_directory_conflict_error":
-            return OutputDirectoryConflictError(str(error), code=code)
-        if code == "tree_format_error":
-            return TreeFormatError(str(error), code=code)
-        return ClusterizationError(str(error), code=code)
-    return DamicoreError(str(error))
+    code = str(getattr(error, "code", ""))
+    for base, by_code, fallback in _STAGE_TRANSLATIONS:
+        if isinstance(error, base):
+            translated = by_code.get(code, fallback)
+            return translated(
+                str(error),
+                code=code if code in _PRESERVED_CODES else None,
+                stage=stage,
+            )
+    return DamicoreError(str(error), stage=stage)
 
 
 def _artifact_inventory(run_dir: Path) -> dict[str, dict[str, object]]:
