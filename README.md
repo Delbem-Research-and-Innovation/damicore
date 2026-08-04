@@ -1,41 +1,57 @@
-# DAMICORE
+# DAMICORE 0.1
 
-DAMICORE is a compression-based data analysis pipeline, split into four
-independent packages plus a thin orchestrator:
+DAMICORE clusters the rows or columns of a local CSV through canonical
+serialization, exact Normalized Compression Distance (NCD), deterministic
+Neighbor Joining, and FastGreedy community detection.
 
-| Package | Responsibility | Install |
-|---|---|---|
-| [`damicore-normalizer`](packages/damicore_normalizer) | Splits a raw dataset into per-column content files | `pip install damicore-normalizer` |
-| [`damicore-distance`](packages/damicore_distance) | Computes a Normalized Compression Distance (NCD) matrix | `pip install damicore-distance` |
-| [`damicore-tree-builder`](packages/damicore_tree_builder) | Builds a Neighbor-Joining tree from a distance matrix | `pip install damicore-tree-builder` |
-| [`damicore-clusterizer`](packages/damicore_clusterizer) | Clustering stage (placeholder, not yet implemented) | `pip install damicore-clusterizer` |
-| [`damicore`](packages/damicore) | Orchestrates the stages above into a single pipeline | `pip install damicore` |
+```bash
+pip install damicore
+```
 
-## Design
+```python
+from damicore import estimate, run
 
-- **Independent by default.** Each `damicore-*` package has its own version,
-  its own dependencies, and zero imports from its siblings. They communicate
-  through typed data contracts (function inputs/outputs), not shared code.
-  Install only the package you need.
-- **`damicore` is additive.** It depends on the four packages above and
-  exposes `damicore.pipeline.run_pipeline`, which sequences them. It exists
-  for consumers who want the full pipeline in one `pip install`; it does not
-  change how the individual packages are consumed.
+preview = estimate("dataset.csv", split="columns")
+print(preview.model_dump())
 
-## Repository layout
+result = run("dataset.csv", split="columns")
+print(result.membership)
+print(result.clusters)
+print(result.tree_newick)
+print(result.distance_matrix.head())
+result.close()
+```
 
-This is a single repository containing all five packages as independent,
-separately publishable distributions, managed as a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/):
-one shared lockfile/virtual environment for development, five independent
-packages for consumption.
+The default exact algorithm accepts at most 1,000 objects, 500,000 pairs, and
+512 MiB per matrix. A multi-gigabyte CSV with tens of columns can be feasible;
+the same file split into millions of rows is intentionally rejected during
+preflight. Streaming and memory maps bound RAM, but NCD remains quadratic and
+Neighbor Joining cubic in the object count. Raise individual `ResourceLimits`
+only after reviewing `estimate`.
+
+Runs are content-addressed, checkpointed, resumable, and verified before they
+become `completed`. Internal paths are contained in the run directory, JSON
+writes are atomic, and completed artifacts are hash-checked by `load_result`.
+See [quickstart](docs/quickstart.md), [CSV contract](docs/csv-contract.md),
+[artifact contract](docs/artifacts.md), and [scalability](docs/scalability.md).
+
+The five public distributions are `damicore`, `damicore-normalizer`,
+`damicore-distance`, `damicore-tree-builder`, and `damicore-clusterizer`.
+Stage packages do not import one another. `synthetic-data` is workspace-only
+and is never published.
+
+For Colab, process and checkpoint on local `/content`, then use `result.save`
+to copy completed artifacts to a mounted Drive destination. DAMICORE never
+imports `google.colab`, accesses the network, or uploads data.
 
 ## Development
 
 ```bash
-make install   # sync the workspace + install git hooks
-make check     # lint + type-check every package
-make test      # run every package's test suite
+uv sync --all-packages --group dev
+make check
+make test
+make build
 ```
 
-Each package also has its own `Makefile` with the same `dev`/`check`/`test`/`clean`
-targets, runnable from inside `packages/<name>/`.
+Python 3.11–3.14 is supported. The normative contract is
+[`DAMICORE_IMPLEMENTATION_SPECIFICATION.md`](DAMICORE_IMPLEMENTATION_SPECIFICATION.md).

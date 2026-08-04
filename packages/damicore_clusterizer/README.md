@@ -1,12 +1,13 @@
 # damicore-clusterizer
 
-Clustering stage of the [DAMICORE](../../README.md) pipeline.
+Cluster every node of a validated DAMICORE tree with igraph FastGreedy and
+project the resulting communities onto leaves.
 
-**Status: placeholder.** This package is scaffolded (packaging, tests, CI)
-but has no public API yet — no clustering logic has been implemented.
+```python
+from damicore_clusterizer import ClusterConfig, cluster_tree
 
-## Install
-
-```bash
-pip install damicore-clusterizer
+result = cluster_tree("tree.json", "run", config=ClusterConfig(num_clusters=None))
 ```
+
+Negative branch lengths receive one global shift. Output cluster IDs and leaf
+ordering are deterministic.

@@ -5,34 +5,34 @@ description = "Pipeline orchestrator that sequences the damicore_* packages (nor
 readme = "README.md"
 license = "Apache-2.0"
 authors = [{ name = "Ennio Politi Lopes", email = "enniolopes@users.noreply.github.com" }]
-requires-python = ">=3.12"
+requires-python = ">=3.11,<3.15"
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "damicore-normalizer",
-    "damicore-distance",
-    "damicore-tree-builder",
-    "damicore-clusterizer",
+    "damicore-normalizer>=0.1.0,<0.2.0",
+    "damicore-distance>=0.1.0,<0.2.0",
+    "damicore-tree-builder>=0.1.0,<0.2.0",
+    "damicore-clusterizer>=0.1.0,<0.2.0",
+    "pandas>=2.2,<4",
+    "pydantic>=2.10,<3",
+    "tqdm>=4.66,<5",
 ]
-
-# Resolved from the sibling packages/* directories via the uv workspace
-# (root pyproject.toml). Once each sub-package is published to PyPI, this
-# table can be dropped so `damicore` depends on the published versions
-# declared above instead of the workspace members.
-[tool.uv.sources]
-damicore-normalizer = { workspace = true }
-damicore-distance = { workspace = true }
-damicore-tree-builder = { workspace = true }
-damicore-clusterizer = { workspace = true }
 
 [tool.uv]
 package = true
 
-[dependency-groups]
-dev = ["ruff>=0.9", "pyright>=1.1", "pytest>=8", "pytest-cov>=6"]
+[project.scripts]
+damicore = "damicore.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 100

@@ -1,3 +1,3 @@
-from synthetic_data.engine import ColumnSpec, generate_rows, write_csv
+from synthetic_data.generator import generate_csv
 
-__all__ = ["ColumnSpec", "generate_rows", "write_csv"]
+__all__ = ["generate_csv"]

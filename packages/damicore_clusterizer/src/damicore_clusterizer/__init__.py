@@ -1,9 +1,6 @@
-"""Clustering stage for the DAMICORE pipeline.
+from damicore_clusterizer.api import cluster_tree
+from damicore_clusterizer.config import ClusterConfig
+from damicore_clusterizer.errors import ClusterizerError
+from damicore_clusterizer.models import ClusterResult
 
-Placeholder: this package does not have a public API yet. It is scaffolded
-(pyproject, tests, CI wiring) so it can be developed and released
-independently, following the same structure as its sibling damicore_*
-packages, but no clustering logic has been implemented.
-"""
-
-__all__: list[str] = []
+__all__ = ["cluster_tree", "ClusterConfig", "ClusterResult", "ClusterizerError"]

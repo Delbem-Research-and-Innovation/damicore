@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v6.6.1
+        with:
+          version: "0.8.3"
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv sync --locked --all-packages --group dev
+      - name: Verify lockstep tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for package in damicore_normalizer damicore_distance damicore_tree_builder damicore_clusterizer damicore; do
+            test "$(uv run python -c "import tomllib; print(tomllib.load(open('packages/$package/pyproject.toml','rb'))['project']['version'])")" = "$version"
+          done
+      - run: uv run ruff check . && uv run pyright && uv run pytest --cov
+      - name: Build once
+        run: |
+          mkdir -p dist
+          for package in damicore-normalizer damicore-distance damicore-tree-builder damicore-clusterizer damicore; do
+            uv build --package "$package" --out-dir dist
+          done
+          sha256sum dist/* > SHA256SUMS
+      - run: uv run twine check dist/*.whl dist/*.tar.gz
+      - name: Publish exact artifacts to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1.13.0
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+          attestations: false
+      - name: Smoke TestPyPI publication
+        run: |
+          uv venv /tmp/damicore-release-smoke --python 3.12
+          version="${GITHUB_REF_NAME#v}"
+          uv pip install --python /tmp/damicore-release-smoke/bin/python --index-url https://test.pypi.org/simple --extra-index-url https://pypi.org/simple "damicore==$version"
+          /tmp/damicore-release-smoke/bin/damicore --help
+      - name: Publish the same artifacts to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1.13.0
+        with:
+          packages-dir: dist
+          attestations: false
+      - uses: softprops/action-gh-release@v2.3.2
+        with:
+          body_path: CHANGELOG.md
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            SHA256SUMS

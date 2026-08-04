@@ -6,25 +6,50 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "latest"
+          version: "0.8.3"
+          python-version: ${{ matrix.python }}
+          enable-cache: false
+      - run: uv sync --locked --all-packages --group dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      - run: uv run pytest --cov --cov-report=xml
 
-      - name: Set up Python
-        run: uv python install
+  minimum-versions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v6.6.1
+        with:
+          version: "0.8.3"
+          python-version: "3.11"
+          enable-cache: false
+      - run: uv lock --resolution lowest-direct
+      - run: uv sync --all-packages --group dev
+      - run: uv run pytest -m "not slow"
 
-      - name: Install workspace dependencies
-        run: uv sync --all-packages --group dev
-
-      - name: Lint + type-check
-        run: make check
-
-      - name: Test
-        run: make test
+  notebook:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v6.6.1
+        with:
+          version: "0.8.3"
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv sync --locked --all-packages --group dev
+      - run: uv run pytest tests/notebooks -m notebook

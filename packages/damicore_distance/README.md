@@ -1,30 +1,16 @@
 # damicore-distance
 
-Computes a Normalized Compression Distance (NCD) matrix for a directory of
-files. Second stage of the [DAMICORE](../../README.md) pipeline.
-
-## Install
-
-```bash
-pip install damicore-distance
-```
-
-## Usage
+Compute an exact, unclamped, float64 NCD matrix from a normalization manifest.
 
 ```python
-from damicore_distance import DistanceMatrixInput, MetricStrategy, compute_distance_matrix
+from damicore_distance import DistanceConfig, compute_distance_matrix
 
 result = compute_distance_matrix(
-    DistanceMatrixInput(
-        input_directory="normalized/",
-        metric_strategy=MetricStrategy(
-            algorithm="ncd",
-            compressor="gzip",
-            compression_level=9,
-        ),
-        output_destination="distance_matrix.csv",
-    )
+    "normalization/manifest.json",
+    "run",
+    config=DistanceConfig(compressor="zlib", workers="auto"),
 )
 ```
 
-This package has no dependency on any other `damicore-*` package.
+Compression is incremental, pairs are lexicographically sharded, only the
+coordinator writes the memory map, and compatible completed shards can resume.

@@ -1,0 +1,31 @@
+name: Weekly dependency audit
+
+on:
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v6.6.1
+        with:
+          version: "0.8.3"
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv lock --upgrade
+      - run: uv sync --all-packages --group dev
+      - run: uv run pytest -m "not slow"
+      - run: uv run pip-audit
+      - run: uv run python benchmarks/benchmark_large_csv.py --directory /tmp/damicore-benchmark --rows 100 --skip-large
+      - name: Open issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "Weekly dependency audit failed" --body "See workflow run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

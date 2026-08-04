@@ -1,14 +1,13 @@
-.PHONY: help install check test clean
+.PHONY: help install check test build clean
 
-export PYRIGHT_PYTHON_FORCE_VERSION := latest
-
-PACKAGES := $(patsubst %/Makefile,%,$(wildcard packages/*/Makefile))
+PUBLIC_PACKAGES := damicore_normalizer damicore_distance damicore_tree_builder damicore_clusterizer damicore
 
 help:
 	@echo "Workspace commands:"
 	@echo "  install  Install all workspace dependencies and git hooks"
-	@echo "  check    Lint + type-check all packages"
-	@echo "  test     Run all package tests"
+	@echo "  check    Lint and type-check the workspace"
+	@echo "  test     Run all tests with coverage gates"
+	@echo "  build    Build the five public distributions"
 	@echo "  clean    Remove build artifacts and the shared .venv"
 
 install:
@@ -16,11 +15,15 @@ install:
 	pre-commit install
 
 check:
-	@set -e; for d in $(PACKAGES); do echo ">>> $$d"; $(MAKE) -C $$d check; done
+	uv run ruff check .
+	uv run ruff format --check .
+	uv run pyright
 
 test:
-	@set -e; for d in $(PACKAGES); do echo ">>> $$d"; $(MAKE) -C $$d test; done
+	uv run pytest --cov --cov-report=term-missing
+
+build:
+	@set -e; for package in $(PUBLIC_PACKAGES); do uv build --package $$package; done
 
 clean:
-	@set -e; for d in $(PACKAGES); do $(MAKE) -C $$d clean; done
-	rm -rf .venv
+	@echo "Remove .venv, dist, coverage, and test caches explicitly when needed."

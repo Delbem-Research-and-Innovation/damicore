@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+
+class DistanceResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    matrix_path: Path
+    labels_path: Path
+    object_count: int = Field(ge=0)
+    pair_count: int = Field(ge=0)
+    timing: float = Field(ge=0)
+
+
+class DistanceMatrixView:
+    def __init__(
+        self,
+        path: str | Path,
+        labels: list[str],
+        *,
+        materialization_limit_bytes: int = 268_435_456,
+        materialization_error: Callable[[str], Exception] = ValueError,
+    ) -> None:
+        self.path = Path(path)
+        self.labels = tuple(labels)
+        self._limit = materialization_limit_bytes
+        self._materialization_error = materialization_error
+        self._matrix: np.memmap[Any, Any] | None = np.load(
+            self.path, mmap_mode="r", allow_pickle=False
+        )
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self._require_open().shape
+
+    @property
+    def dtype(self) -> np.dtype[Any]:
+        return self._require_open().dtype
+
+    def __getitem__(self, key: object) -> object:
+        return self._require_open()[key]
+
+    def head(self, n: int = 5) -> pd.DataFrame:
+        import pandas as pd
+
+        size = min(max(n, 0), len(self.labels))
+        values = np.asarray(self._require_open()[:size, :size])
+        labels = list(self.labels[:size])
+        return pd.DataFrame(values, index=labels, columns=labels)
+
+    def to_pandas(self, force: bool = False) -> pd.DataFrame:
+        import pandas as pd
+
+        matrix = self._require_open()
+        if matrix.nbytes > self._limit and not force:
+            raise self._materialization_error(
+                f"Matrix materialization requires {matrix.nbytes} bytes; "
+                "use head(), NumPy slicing, or to_pandas(force=True)"
+            )
+        return pd.DataFrame(np.asarray(matrix), index=self.labels, columns=self.labels)
+
+    def close(self) -> None:
+        if self._matrix is not None:
+            mmap = getattr(self._matrix, "_mmap", None)
+            if mmap is not None:
+                mmap.close()
+            self._matrix = None
+
+    def _require_open(self) -> np.memmap[Any, Any]:
+        if self._matrix is None:
+            raise ValueError("Distance matrix is closed; reload it with load_result")
+        return self._matrix

@@ -1,0 +1,76 @@
+name: Build distributions
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v6.6.1
+        with:
+          version: "0.8.3"
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv sync --locked --all-packages --group dev
+      - name: Build explicit public allowlist
+        run: |
+          mkdir -p dist
+          for package in damicore-normalizer damicore-distance damicore-tree-builder damicore-clusterizer damicore; do
+            uv build --package "$package" --out-dir dist
+          done
+      - run: uv run twine check dist/*
+      - run: uv run pip-audit
+      - name: Reject workspace paths and unexpected distributions
+        run: |
+          test "$(find dist -name '*.whl' | wc -l)" -eq 5
+          test "$(find dist -name '*.tar.gz' | wc -l)" -eq 5
+          for wheel in dist/*.whl; do unzip -p "$wheel" '*/METADATA'; done > /tmp/all-metadata.txt
+          ! grep -E 'file:|workspace|packages/' /tmp/all-metadata.txt
+          ! find dist -iname '*synthetic*' | grep .
+      - name: Isolated stage wheel smoke
+        run: |
+          for package in damicore_normalizer damicore_distance damicore_tree_builder damicore_clusterizer; do
+            uv venv "/tmp/$package-venv" --python 3.12
+            uv pip install --python "/tmp/$package-venv/bin/python" "$(find dist -name "$package-*.whl")"
+            "/tmp/$package-venv/bin/python" -c "import $package; assert $package.__all__"
+          done
+      - name: Isolated aggregate wheel smoke
+        run: |
+          uv venv /tmp/damicore-wheel-venv --python 3.12
+          uv pip install --python /tmp/damicore-wheel-venv/bin/python dist/*.whl
+          /tmp/damicore-wheel-venv/bin/python -c "import damicore, damicore_normalizer, damicore_distance, damicore_tree_builder, damicore_clusterizer"
+      - name: Compare logical wheel contents after rebuild
+        run: |
+          mkdir -p /tmp/rebuilt
+          for package in damicore-normalizer damicore-distance damicore-tree-builder damicore-clusterizer damicore; do
+            uv build --package "$package" --wheel --out-dir /tmp/rebuilt
+          done
+          uv run python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          def contents(path):
+              with ZipFile(path) as archive:
+                  return {name: archive.read(name) for name in archive.namelist()}
+
+          for original in Path("dist").glob("*.whl"):
+              rebuilt = Path("/tmp/rebuilt") / original.name
+              assert contents(original) == contents(rebuilt), original.name
+          PY
+      - name: Execute notebook against installed wheels
+        env:
+          DAMICORE_NOTEBOOK_PYTHON: /tmp/damicore-wheel-venv/bin/python
+        run: uv run pytest tests/notebooks -m notebook
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: distributions
+          path: dist/*
+          if-no-files-found: error

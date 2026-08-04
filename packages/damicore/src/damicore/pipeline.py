@@ -1,75 +1,176 @@
-"""Pipeline orchestrator that sequences the damicore_* packages.
-
-Each stage is called through the public, versioned data contract of its
-package (the ``__all__`` surface of ``damicore_normalizer``,
-``damicore_distance`` and ``damicore_tree_builder``). This module owns no
-domain logic of its own — it only wires the output of one stage into the
-input of the next.
-
-The clusterizer stage is intentionally not wired in yet: ``damicore_clusterizer``
-does not have a public API to call.
-"""
-
 from __future__ import annotations
 
-from typing import Any, TypedDict
+import logging
+import platform
+import time
+import zlib
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+from typing import Any
 
-from damicore_distance import DistanceMatrixInput, DistanceMatrixOutput, compute_distance_matrix
-from damicore_distance.core import MetricStrategy
-from damicore_normalizer import NormalizerInput, NormalizerOutput, normalize_dataset
-from damicore_tree_builder import run as build_tree
+from pydantic import ValidationError
 
+from damicore.errors import ArtifactValidationError, CheckpointMismatchError
+from damicore.manifest import PipelineCheckpoint, artifact_record, atomic_json, sha256_file
 
-class PipelineInput(TypedDict):
-    """End-to-end contract for running normalizer -> distance -> tree_builder."""
-
-    normalizer: NormalizerInput
-    distance_metric_strategy: MetricStrategy
-    distance_output_path: str
-    tree_output_path: str
-
-
-class PipelineOutput(TypedDict):
-    """Aggregated report from every stage of the pipeline."""
-
-    normalizer: NormalizerOutput
-    distance: DistanceMatrixOutput
-    tree_builder: dict[str, Any]
+logger = logging.getLogger(__name__)
 
 
-def run_pipeline(contract: PipelineInput) -> PipelineOutput:
-    """Run the normalizer, distance and tree_builder stages in sequence.
-
-    Parameters
-    ----------
-    contract : PipelineInput
-        Input for the normalizer stage plus the parameters required by the
-        distance and tree_builder stages. The ``input_directory`` for the
-        distance stage and the ``input_path`` for the tree_builder stage are
-        derived automatically from the previous stage's output.
-
-    Returns
-    -------
-    PipelineOutput
-        The output of each stage, keyed by stage name.
-    """
-    normalizer_output = normalize_dataset(contract["normalizer"])
-
-    distance_output = compute_distance_matrix(
-        DistanceMatrixInput(
-            input_directory=normalizer_output["output_directory_path"],
-            metric_strategy=contract["distance_metric_strategy"],
-            output_destination=contract["distance_output_path"],
-        )
+def runtime_fingerprint() -> dict[str, str]:
+    packages = (
+        "damicore",
+        "damicore-normalizer",
+        "damicore-distance",
+        "damicore-tree-builder",
+        "damicore-clusterizer",
     )
-
-    tree_builder_output = build_tree(
-        input_path=distance_output.output_file_path,
-        output_path=contract["tree_output_path"],
-    )
-
+    versions: dict[str, str] = {}
+    for package in packages:
+        try:
+            versions[package] = version(package)
+        except PackageNotFoundError:
+            versions[package] = "unknown"
     return {
-        "normalizer": normalizer_output,
-        "distance": distance_output,
-        "tree_builder": tree_builder_output,
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "numpy": version("numpy"),
+        "igraph": version("igraph"),
+        "zlib_build": zlib.ZLIB_VERSION,
+        "zlib_runtime": zlib.ZLIB_RUNTIME_VERSION,
+        **versions,
     }
+
+
+class PipelineJournal:
+    def __init__(self, run_dir: Path, manifest: dict[str, Any]) -> None:
+        self.run_dir = run_dir
+        self.manifest_path = run_dir / "manifest.json"
+        self.checkpoint_path = run_dir / "checkpoints" / "pipeline.json"
+        self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        self.manifest = manifest
+        self.runtime = runtime_fingerprint()
+        if self.checkpoint_path.exists():
+            try:
+                checkpoint = PipelineCheckpoint.model_validate_json(
+                    self.checkpoint_path.read_text(encoding="utf-8")
+                )
+            except (OSError, ValidationError) as exc:
+                raise CheckpointMismatchError("Pipeline checkpoint is unreadable") from exc
+            if checkpoint.schema_version != 1 or checkpoint.runtime != self.runtime:
+                raise CheckpointMismatchError("Runtime fingerprint differs from checkpoint")
+            self.receipts: dict[str, Any] = {
+                stage: receipt.model_dump(mode="json")
+                for stage, receipt in checkpoint.receipts.items()
+            }
+        else:
+            self.receipts = {}
+            self._write_checkpoint()
+
+    def _write_checkpoint(self) -> None:
+        atomic_json(
+            self.checkpoint_path,
+            {
+                "schema_version": 1,
+                "runtime": self.runtime,
+                "receipts": self.receipts,
+            },
+        )
+
+    def transition(self, state: str) -> None:
+        self.manifest["status"] = state
+        self.manifest["updated_at"] = _utc_now()
+        self.manifest["stages"] = self.receipts
+        atomic_json(self.manifest_path, self.manifest)
+
+    def stage_started(self, stage: str, inputs: list[Path]) -> float:
+        logger.info("stage_started", extra={"stage": stage})
+        started = time.monotonic()
+        self.receipts[stage] = {
+            "status": "running",
+            "started_at": _utc_now(),
+            "finished_at": None,
+            "runtime": self.runtime,
+            "inputs": [self._input_record(path) for path in inputs],
+            "outputs": [],
+            "metrics": {},
+        }
+        self._write_checkpoint()
+        self.transition(stage)
+        return started
+
+    def stage_completed(
+        self,
+        stage: str,
+        started: float,
+        outputs: list[Path],
+        metrics: dict[str, int | float | str | bool],
+    ) -> None:
+        receipt = self.receipts[stage]
+        receipt.update(
+            {
+                "status": "completed",
+                "finished_at": _utc_now(),
+                "outputs": [self._record(path) for path in outputs],
+                "metrics": {**metrics, "seconds": time.monotonic() - started},
+            }
+        )
+        self._write_checkpoint()
+        self.manifest["stages"] = self.receipts
+        atomic_json(self.manifest_path, self.manifest)
+        logger.info("stage_completed", extra={"stage": stage, **metrics})
+
+    def reusable(self, stage: str) -> bool:
+        receipt = self.receipts.get(stage)
+        if not isinstance(receipt, dict) or receipt.get("status") != "completed":
+            return False
+        if receipt.get("runtime") != self.runtime:
+            raise CheckpointMismatchError(f"Runtime changed for stage {stage}")
+        outputs = receipt.get("outputs")
+        if not isinstance(outputs, list) or not outputs:
+            raise CheckpointMismatchError(f"Stage {stage} has no output receipt")
+        for record in outputs:
+            path = self._resolve_record(record)
+            if (
+                not path.is_file()
+                or path.stat().st_size != record.get("size_bytes")
+                or sha256_file(path) != record.get("sha256")
+            ):
+                raise ArtifactValidationError(f"Reusable output is corrupt: {path.name}")
+        logger.info("artifact_reused", extra={"stage": stage})
+        return True
+
+    def _record(self, path: Path) -> dict[str, object]:
+        resolved = path.resolve()
+        if not resolved.is_relative_to(self.run_dir) or resolved.is_symlink():
+            raise ArtifactValidationError("Receipt path escapes the run directory")
+        return artifact_record(resolved, self.run_dir)
+
+    def _input_record(self, path: Path) -> dict[str, object]:
+        resolved = path.resolve()
+        if not resolved.is_file() or resolved.is_symlink():
+            raise ArtifactValidationError("Receipt input is not a regular file")
+        if resolved.is_relative_to(self.run_dir):
+            return self._record(resolved)
+        return {
+            "path": str(resolved),
+            "size_bytes": resolved.stat().st_size,
+            "sha256": sha256_file(resolved),
+        }
+
+    def _resolve_record(self, record: dict[str, Any]) -> Path:
+        relative = Path(str(record.get("path", "")))
+        path = (self.run_dir / relative).resolve()
+        if (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or not path.is_relative_to(self.run_dir)
+            or path.is_symlink()
+        ):
+            raise ArtifactValidationError("Receipt path escapes the run directory")
+        return path
+
+
+def _utc_now() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat()
