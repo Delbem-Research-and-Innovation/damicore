@@ -16,12 +16,13 @@ jobs:
       - uses: actions/checkout@v4.2.2
       - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.8.3"
+          version: "0.12.1"
           python-version: "3.12"
           enable-cache: false
       - run: uv lock --upgrade
       - run: uv sync --all-packages --group dev
-      - run: uv run pytest -m "not slow"
+      - run: uv run pytest --cov
+      - run: make coverage-critical
       - run: uv run pip-audit
       - run: uv run python benchmarks/benchmark_large_csv.py --directory /tmp/damicore-benchmark --rows 100 --skip-large
       - name: Open issue on failure

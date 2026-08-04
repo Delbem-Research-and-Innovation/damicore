@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4.2.2
       - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.8.3"
+          version: "0.12.1"
           python-version: "3.12"
           enable-cache: false
       - run: uv sync --locked --all-packages --group dev
@@ -26,7 +26,13 @@ jobs:
           for package in damicore_normalizer damicore_distance damicore_tree_builder damicore_clusterizer damicore; do
             test "$(uv run python -c "import tomllib; print(tomllib.load(open('packages/$package/pyproject.toml','rb'))['project']['version'])")" = "$version"
           done
-      - run: uv run ruff check . && uv run pyright && uv run pytest --cov
+      - name: Run the full core gate on the tagged commit
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run pyright
+          uv run pytest --cov
+          make coverage-critical
       - name: Build once
         run: |
           mkdir -p dist

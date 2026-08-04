@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4.2.2
       - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.8.3"
+          version: "0.12.1"
           python-version: "3.12"
           enable-cache: false
       - run: uv sync --locked --all-packages --group dev
@@ -47,6 +47,24 @@ jobs:
           uv venv /tmp/damicore-wheel-venv --python 3.12
           uv pip install --python /tmp/damicore-wheel-venv/bin/python dist/*.whl
           /tmp/damicore-wheel-venv/bin/python -c "import damicore, damicore_normalizer, damicore_distance, damicore_tree_builder, damicore_clusterizer"
+      - name: Install only damicore and run end-to-end
+        run: |
+          uv venv /tmp/damicore-e2e-venv --python 3.12
+          uv pip install --python /tmp/damicore-e2e-venv/bin/python --find-links dist damicore
+          /tmp/damicore-e2e-venv/bin/python -c '
+          import tempfile, pathlib
+          from damicore import run, load_result, ExecutionConfig
+          directory = pathlib.Path(tempfile.mkdtemp())
+          csv = directory / "dataset.csv"
+          csv.write_text("a,b,c,d\n1,4,7,9\n2,5,8,1\n3,6,2,4\n1,4,7,8\n", encoding="utf-8")
+          result = run(str(csv), output_dir=str(directory / "run"), progress=False,
+                       execution=ExecutionConfig(workers=1))
+          assert result.report.status == "completed"
+          assert list(result.membership.columns) == ["object_id", "label", "cluster"]
+          result.close()
+          assert load_result(str(directory / "run")).report.status == "completed"
+          print("aggregate e2e OK")
+          '
       - name: Compare logical wheel contents after rebuild
         run: |
           mkdir -p /tmp/rebuilt
