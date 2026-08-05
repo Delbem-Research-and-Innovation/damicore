@@ -318,6 +318,24 @@ def test_a_corrupted_written_object_fails_artifact_validation(
     assert raised.value.code == "artifact_validation_error"
 
 
+def test_a_failed_manifest_write_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The manifest is written atomically through a temporary file, so a failure before the
+    rename must not leave that partial file behind for a later run to trip over."""
+    source = _csv(tmp_path)
+    output = tmp_path / "out"
+
+    def failing_replace(src: object, dst: object) -> None:
+        raise OSError("simulated failure while committing the manifest")
+
+    monkeypatch.setattr(api.os, "replace", failing_replace)
+    with pytest.raises(OSError):
+        normalize_csv(source, output)
+    assert not (output / "manifest.json").exists()
+    assert list(output.iterdir()) == [output / "objects"]
+
+
 def test_output_must_be_empty_and_user_files_survive(tmp_path: Path) -> None:
     source = _csv(tmp_path)
     output = tmp_path / "occupied"
