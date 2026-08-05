@@ -10,6 +10,7 @@ import pytest
 import damicore_tree_builder.api as api
 import damicore_tree_builder.artifacts as artifacts
 from damicore_tree_builder import Tree, TreeBuilderError, build_tree, neighbor_joining
+from damicore_tree_builder.neighbor_joining import build_neighbor_joining
 from damicore_tree_builder.newick import to_newick
 
 pytestmark = pytest.mark.unit
@@ -147,18 +148,46 @@ def _matrix(rows: list[list[float]]) -> npt.NDArray[np.float64]:
     return np.array(rows, dtype=np.float64)
 
 
+# Every guard here raises the same code, so the message is the only thing that says WHICH
+# property broke. Without it the rows are interchangeable: delete the finiteness check and
+# the nan row still passes, because np.array_equal reports NaN as unequal and the symmetry
+# guard fires in its place.
 @pytest.mark.parametrize(
-    ("matrix", "labels"),
+    ("matrix", "labels", "discriminator"),
     [
-        pytest.param(_matrix([[0.0, float("nan")], [float("nan"), 0.0]]), ["a", "b"], id="nan"),
-        pytest.param(_matrix([[0.0, 1.0], [2.0, 0.0]]), ["a", "b"], id="asymmetric"),
-        pytest.param(_matrix([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]), ["a", "b"], id="not-square"),
-        pytest.param(_matrix([[0.0, 1.0], [1.0, 0.0]]), ["a", "a"], id="duplicate-labels"),
-        pytest.param(_matrix([[1.0, 1.0], [1.0, 0.0]]), ["a", "b"], id="non-zero-diagonal"),
+        pytest.param(
+            _matrix([[0.0, float("nan")], [float("nan"), 0.0]]),
+            ["a", "b"],
+            "must be finite",
+            id="nan",
+        ),
+        pytest.param(
+            _matrix([[0.0, 1.0], [2.0, 0.0]]), ["a", "b"], "bitwise symmetric", id="asymmetric"
+        ),
+        pytest.param(
+            _matrix([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+            ["a", "b"],
+            "shape does not match labels",
+            id="not-square",
+        ),
+        pytest.param(
+            _matrix([[0.0, 1.0], [1.0, 0.0]]),
+            ["a", "a"],
+            "two unique labels",
+            id="duplicate-labels",
+        ),
+        pytest.param(
+            _matrix([[1.0, 1.0], [1.0, 0.0]]),
+            ["a", "b"],
+            "diagonal must be exactly zero",
+            id="non-zero-diagonal",
+        ),
     ],
 )
-def test_invalid_matrix_is_rejected(matrix: npt.NDArray[np.float64], labels: list[str]) -> None:
-    with pytest.raises(TreeBuilderError):
+def test_invalid_matrix_is_rejected(
+    matrix: npt.NDArray[np.float64], labels: list[str], discriminator: str
+) -> None:
+    with pytest.raises(TreeBuilderError, match=discriminator):
         neighbor_joining(matrix, labels)
 
 
@@ -382,3 +411,23 @@ def test_the_first_join_follows_the_rule_a_float_comparison_would_lose(seed: int
     tree = neighbor_joining(matrix, labels)
     joined = {edge.target for edge in tree.edges if edge.source == "nj_000001"}
     assert joined == {expected_left, expected_right}
+
+
+@pytest.mark.parametrize("q_block_size", [1, 2, 3, 512])
+def test_the_q_block_size_does_not_change_the_tree(q_block_size: int) -> None:
+    """Specification section 15.4: blocking bounds how much of the Q scan is in flight, never
+    which pair wins. Every existing test uses the default on a matrix smaller than one block,
+    so the loop never took a second iteration and a blocking bug would have been invisible."""
+    generator = np.random.default_rng(5)
+    values = generator.random((8, 8)) * 10
+    matrix = (values + values.T) / 2
+    np.fill_diagonal(matrix, 0.0)  # pyright: ignore[reportUnknownMemberType]
+    labels = [f"obj_{index:03d}" for index in range(8)]
+
+    reference = build_neighbor_joining(
+        np.array(matrix, dtype=np.float64, copy=True), list(labels), q_block_size=512
+    )
+    blocked = build_neighbor_joining(
+        np.array(matrix, dtype=np.float64, copy=True), list(labels), q_block_size=q_block_size
+    )
+    assert blocked.model_dump(mode="json") == reference.model_dump(mode="json")
