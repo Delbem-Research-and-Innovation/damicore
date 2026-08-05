@@ -3,7 +3,7 @@ import json
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import IO, Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -259,6 +259,10 @@ def test_a_failed_artifact_write_leaves_no_temporary_file(
 
     assert not list(output.glob(".membership.*"))
     assert not list(output.glob(".clusters.json.*"))
+    # Neither artifact may survive a partial write: the next run refuses a directory holding
+    # either one, so a stranded membership.csv would need manual cleanup to recover from.
+    assert not (output / "membership.csv").exists()
+    assert not (output / "clusters.json").exists()
 
 
 def test_invalid_json_is_rejected(tmp_path: Path) -> None:
@@ -308,3 +312,31 @@ def test_a_branch_far_below_zero_exhausts_the_shift_epsilon(tmp_path: Path) -> N
     source.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ClusterizerError, match="Adjusted branch lengths must be positive"):
         cluster_tree(source, tmp_path / "out")
+
+
+# Staging happens before either rename, so a failure there must also leave nothing behind.
+# The index selects which staged write fails: 1 is membership.csv, 2 is clusters.json.
+@pytest.mark.parametrize(
+    "failing_write",
+    [pytest.param(1, id="staging-membership"), pytest.param(2, id="staging-clusters")],
+)
+def test_a_failed_staged_write_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing_write: int
+) -> None:
+    writes = 0
+    real_fdopen = os.fdopen
+
+    def counting_fdopen(descriptor: int, mode: str = "r", **kwargs: Any) -> IO[Any]:
+        nonlocal writes
+        writes += 1
+        if writes == failing_write:
+            os.close(descriptor)
+            raise OSError("simulated failure while staging an artifact")
+        return real_fdopen(descriptor, mode, **kwargs)
+
+    monkeypatch.setattr(artifacts.os, "fdopen", counting_fdopen)
+    output = tmp_path / "out"
+    with pytest.raises(OSError, match="simulated failure while staging an artifact"):
+        cluster_tree(_tree(tmp_path), output)
+
+    assert list(output.iterdir()) == []
