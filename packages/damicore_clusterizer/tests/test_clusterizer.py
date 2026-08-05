@@ -7,7 +7,9 @@ from typing import Any
 
 import pytest
 
+import damicore_clusterizer.api as api
 import damicore_clusterizer.artifacts as artifacts
+import damicore_clusterizer.tree_graph as tree_graph
 from damicore_clusterizer import ClusterConfig, ClusterizerError, cluster_tree
 
 pytestmark = pytest.mark.unit
@@ -152,6 +154,40 @@ def test_invalid_tree_contract_is_rejected(tmp_path: Path, mutation: TreeMutatio
     source.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ClusterizerError):
         cluster_tree(source, tmp_path / "invalid")
+
+
+def test_a_membership_that_misses_a_leaf_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every leaf must land in exactly one cluster. A membership shorter than the vertex list
+    silently drops the trailing leaves, so the completeness check is the only thing standing
+    between that and a membership.csv missing rows the caller asked for."""
+
+    def truncated_membership(
+        graph: object, num_clusters: int | None
+    ) -> tuple[list[int], int, float]:
+        return ([0, 0, 0], 1, 0.5)
+
+    monkeypatch.setattr(api, "fastgreedy_membership", truncated_membership)
+    with pytest.raises(ClusterizerError, match="incomplete") as raised:
+        cluster_tree(_tree(tmp_path), tmp_path / "out")
+    assert raised.value.code == "clusterization_error"
+
+
+def test_an_unexpected_graph_failure_is_reported_as_a_tree_format_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """load_tree_graph wraps the assembly step so a low-level failure from igraph or from
+    float handling reaches the caller as this package's own typed error, never as a raw
+    library exception the caller cannot classify."""
+
+    def failing_graph(*args: object, **kwargs: object) -> object:
+        raise TypeError("simulated igraph construction failure")
+
+    monkeypatch.setattr(tree_graph.ig, "Graph", failing_graph)
+    with pytest.raises(ClusterizerError, match="schema version 1") as raised:
+        cluster_tree(_tree(tmp_path), tmp_path / "out")
+    assert raised.value.code == "tree_format_error"
 
 
 # Both artifacts are written through their own temporary file, so each rename is a separate
