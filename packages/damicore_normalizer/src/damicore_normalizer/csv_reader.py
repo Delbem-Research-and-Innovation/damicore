@@ -174,7 +174,8 @@ def scan_csv(
             max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
     except NormalizerError:
         raise
-    except (OSError, UnicodeError, ValueError, pd.errors.ParserError) as exc:
+    except (OSError, UnicodeError, ValueError) as exc:
+        # pd.errors.ParserError is a ValueError subclass, already caught above.
         raise NormalizerError("CSV parsing failed", code="csv_format_error") from exc
     finally:
         if pool is not None:
