@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 import damicore_clusterizer.api as api
 import damicore_clusterizer.artifacts as artifacts
@@ -83,8 +84,6 @@ def test_more_requested_clusters_than_leaves_is_rejected(tmp_path: Path) -> None
         )
 
 
-# Each row breaks one clause of the tree contract. The ids name the clause, so a regression
-# reports which part of the schema stopped being enforced instead of an opaque index.
 # JSON payloads are dynamic by nature, hence the Any in the mutation signature.
 TreeMutation = Callable[[dict[str, Any]], object]
 
@@ -120,39 +119,83 @@ def _overflow_shift(value: dict[str, Any]) -> None:
     value["edges"][1].update(length=1e308)
 
 
-TREE_CONTRACT_MUTATIONS: list[tuple[str, TreeMutation]] = [
-    ("wrong-schema-version", lambda value: value.update(schema_version=2)),
-    ("unknown-root", lambda value: value.update(root_id="missing")),
-    ("duplicate-node", lambda value: value["nodes"].append(value["nodes"][0])),
-    ("unknown-node-kind", lambda value: value["nodes"][0].update(kind="unknown")),
-    ("root-as-leaf", lambda value: value["nodes"][-1].update(kind="leaf", label="root")),
-    ("leaf-without-label", lambda value: value["nodes"][0].update(label=None)),
-    ("node-without-id", lambda value: value["nodes"][0].pop("id")),
-    ("missing-edge", lambda value: value["edges"].pop()),
-    ("non-finite-length", lambda value: value["edges"][0].update(length=float("nan"))),
-    ("dangling-edge", lambda value: value["edges"][0].update(target="missing")),
-    ("extra-field", lambda value: value.update(unexpected=True)),
+# Each row breaks one clause of the tree contract and names the message that clause raises.
+# The discriminator is what makes the row test the clause it is named for: without it every
+# row asserts only "some ClusterizerError", and several would pass through a different guard
+# entirely -- `duplicate-node` still raised with its own guard deleted, and the old
+# `missing-edge` row popped a ROOT edge and so never reached the edge-count check at all.
+TREE_CONTRACT_MUTATIONS: list[tuple[str, TreeMutation, str]] = [
+    ("wrong-schema-version", lambda value: value.update(schema_version=2), "Invalid tree artifact"),
+    ("unknown-root", lambda value: value.update(root_id="missing"), "root_id names no node"),
+    (
+        "duplicate-node",
+        lambda value: value["nodes"].append(value["nodes"][0]),
+        "node ids are not unique",
+    ),
+    (
+        "unknown-node-kind",
+        lambda value: value["nodes"][0].update(kind="unknown"),
+        "Invalid tree artifact",
+    ),
+    (
+        "root-as-leaf",
+        lambda value: value["nodes"][-1].update(kind="leaf", label="root"),
+        "Tree root must be internal",
+    ),
+    (
+        "leaf-without-label",
+        lambda value: value["nodes"][0].update(label=None),
+        "Every leaf must have a string label",
+    ),
+    ("node-without-id", lambda value: value["nodes"][0].pop("id"), "Invalid tree artifact"),
+    (
+        "missing-non-root-edge",
+        lambda value: value["edges"].pop(0),
+        "Unrooted tree must have n-1 edges",
+    ),
+    (
+        "missing-root-edge",
+        lambda value: value["edges"].pop(),
+        "Tree root must have exactly two children",
+    ),
+    (
+        "non-finite-length",
+        lambda value: value["edges"][0].update(length=float("nan")),
+        "Invalid tree artifact",
+    ),
+    (
+        "dangling-edge",
+        lambda value: value["edges"][0].update(target="missing"),
+        "Tree edge references an unknown node",
+    ),
+    ("extra-field", lambda value: value.update(unexpected=True), "Invalid tree artifact"),
     # Structural clauses the schema alone cannot express: they hold over the assembled graph,
     # after the root's two edges are merged into the single unrooted edge.
-    ("fewer-than-two-leaves", _leave_one_leaf),
-    ("edge-count-not-n-minus-one", _add_redundant_edge),
-    ("disconnected-graph", _strand_one_leaf),
-    ("root-merge-overflows-to-infinity", _overflow_root_merge),
-    ("shift-overflows-adjusted-length", _overflow_shift),
+    ("fewer-than-two-leaves", _leave_one_leaf, "at least two leaves"),
+    ("edge-count-not-n-minus-one", _add_redundant_edge, "Unrooted tree must have n-1 edges"),
+    ("disconnected-graph", _strand_one_leaf, "Tree graph is disconnected"),
+    ("root-merge-overflows-to-infinity", _overflow_root_merge, "Branch lengths must be finite"),
+    (
+        "shift-overflows-adjusted-length",
+        _overflow_shift,
+        "Adjusted branch lengths must be positive",
+    ),
 ]
 
 
 @pytest.mark.parametrize(
-    "mutation",
-    [mutation for _, mutation in TREE_CONTRACT_MUTATIONS],
-    ids=[name for name, _ in TREE_CONTRACT_MUTATIONS],
+    ("mutation", "discriminator"),
+    [(mutation, discriminator) for _, mutation, discriminator in TREE_CONTRACT_MUTATIONS],
+    ids=[name for name, _, _ in TREE_CONTRACT_MUTATIONS],
 )
-def test_invalid_tree_contract_is_rejected(tmp_path: Path, mutation: TreeMutation) -> None:
+def test_invalid_tree_contract_is_rejected(
+    tmp_path: Path, mutation: TreeMutation, discriminator: str
+) -> None:
     source = _tree(tmp_path)
     payload = json.loads(source.read_text(encoding="utf-8"))
     mutation(payload)
     source.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ClusterizerError):
+    with pytest.raises(ClusterizerError, match=discriminator):
         cluster_tree(source, tmp_path / "invalid")
 
 
@@ -223,3 +266,10 @@ def test_invalid_json_is_rejected(tmp_path: Path) -> None:
     source.write_text("nope", encoding="utf-8")
     with pytest.raises(ClusterizerError):
         cluster_tree(source, tmp_path / "invalid")
+
+
+def test_an_unknown_configuration_field_is_rejected() -> None:
+    """A misspelled option must fail rather than be dropped: ClusterConfig(num_cluster=3)
+    silently clustering with the default is worse than not running at all."""
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ClusterConfig(num_cluster=3)  # pyright: ignore[reportCallIssue]
