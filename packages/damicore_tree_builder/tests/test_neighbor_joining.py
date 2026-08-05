@@ -317,3 +317,31 @@ def test_a_failed_tree_write_leaves_no_temporary_file(
     with pytest.raises(OSError):
         build_tree(matrix_path, labels_path, output)
     assert not list(output.glob(".tree.*"))
+
+
+# At three remaining nodes every pair has Q = -(d_ij + d_ik + d_jk), so all three are exactly
+# equal whatever the distances are. Section 15.2 then mandates the lexicographically smallest
+# ID pair. Row sums are recomputed each round precisely so this equality survives as an exact
+# float64 tie: maintained incrementally they drift, and drift, not the rule, picks the pair.
+@pytest.mark.parametrize(
+    "order",
+    [
+        pytest.param(["a", "b", "c"], id="already-sorted"),
+        pytest.param(["c", "b", "a"], id="reversed"),
+        pytest.param(["b", "c", "a"], id="rotated"),
+    ],
+)
+def test_an_exact_q_tie_is_broken_by_the_smallest_id_pair(order: list[str]) -> None:
+    distances = {("a", "b"): 7.0, ("a", "c"): 3.0, ("b", "c"): 5.0}
+
+    def distance(left: str, right: str) -> float:
+        if left == right:
+            return 0.0
+        return distances[(left, right)] if (left, right) in distances else distances[(right, left)]
+
+    matrix = np.array(
+        [[distance(left, right) for right in order] for left in order], dtype=np.float64
+    )
+    tree = neighbor_joining(matrix, order)
+    joined = {edge.target for edge in tree.edges if edge.source == "nj_000001"}
+    assert joined == {"a", "b"}

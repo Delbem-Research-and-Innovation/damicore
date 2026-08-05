@@ -77,14 +77,20 @@ def build_neighbor_joining(
     ]
     edges: list[TreeEdge] = []
     internal_index = 1
-    row_sums = {
-        node: float(sum(work[slots[node], slots[other]] for other in active if other != node))
-        for node in active
-    }
 
     while len(active) > 2:
         active.sort()
         count = len(active)
+        # Recomputed from the matrix every round rather than maintained incrementally.
+        # The incremental form accumulates about 1e-15 of drift, and section 15.2's tie-break
+        # triggers on *exact* float64 equality of the Q scores: at three or four remaining
+        # nodes the competing pairs are mathematically equal, so drift decides the pair and
+        # the lexicographic rule never runs. The cost is O(r^2), already the cost of the Q
+        # scan below, so nothing changes asymptotically.
+        row_sums = {
+            node: float(sum(work[slots[node], slots[other]] for other in active if other != node))
+            for node in active
+        }
         best: tuple[float, str, str] | None = None
         for block_start in range(0, count, q_block_size):
             block_stop = min(block_start + q_block_size, count)
@@ -118,7 +124,6 @@ def build_neighbor_joining(
             ]
         )
         remaining = [node for node in active if node not in (left, right)]
-        internal_sum = 0.0
         for other in remaining:
             other_slot = slots[other]
             left_distance = float(work[left_slot, other_slot])
@@ -126,15 +131,10 @@ def build_neighbor_joining(
             updated = 0.5 * (left_distance + right_distance - distance)
             work[left_slot, other_slot] = updated
             work[other_slot, left_slot] = updated
-            row_sums[other] = row_sums[other] - left_distance - right_distance + updated
-            internal_sum += updated
         work[left_slot, left_slot] = 0.0
         slots.pop(left)
         slots.pop(right)
-        row_sums.pop(left)
-        row_sums.pop(right)
         slots[internal] = left_slot
-        row_sums[internal] = internal_sum
         active = [*remaining, internal]
 
     active.sort()
