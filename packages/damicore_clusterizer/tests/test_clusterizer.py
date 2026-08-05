@@ -3,7 +3,7 @@ import json
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -273,3 +273,38 @@ def test_an_unknown_configuration_field_is_rejected() -> None:
     silently clustering with the default is worse than not running at all."""
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         ClusterConfig(num_cluster=3)  # pyright: ignore[reportCallIssue]
+
+
+def test_the_root_is_removed_by_merging_its_two_edges(tmp_path: Path) -> None:
+    """Specification 16.1: a degree-two root is not a real bifurcation, so its two edges
+    become one edge between its children carrying the summed length, and every edge weight
+    is the reciprocal of the shifted length. Both were unasserted while coverage read 100%."""
+    graph_input = tree_graph.load_tree_graph(_tree(tmp_path))
+    names = graph_input.vertex_names
+    # igraph's edge list and attribute access are untyped in the shipped stubs; the casts
+    # isolate that boundary rather than letting Unknown leak into the assertions.
+    graph = cast(Any, graph_input.graph)
+    lengths = {
+        frozenset((names[int(edge.source)], names[int(edge.target)])): 1.0 / float(edge["weight"])
+        for edge in graph.es
+    }
+
+    assert "nj_root" not in names
+    shift = graph_input.shift
+    # The fixture's root edges are 2.0 and 2.0, so the merged edge is 4.0 before the shift.
+    assert lengths[frozenset(("i1", "i2"))] == pytest.approx(4.0 + shift)
+    assert lengths[frozenset(("b", "i1"))] == pytest.approx(1.0 + shift)
+
+
+def test_a_branch_far_below_zero_exhausts_the_shift_epsilon(tmp_path: Path) -> None:
+    """Specification 16.1 fixes the shift as `-min + 1e-12`, an absolute epsilon. Once the
+    minimum is large enough that 1e-12 falls below its ulp, the shifted minimum lands exactly
+    on zero and a structurally valid tree is refused. This pins that boundary as the current
+    contract; widening it means changing the formula the specification mandates.
+    """
+    payload = json.loads(_tree(tmp_path).read_text(encoding="utf-8"))
+    payload["edges"][0].update(length=-1e5)
+    source = tmp_path / "deep.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ClusterizerError, match="Adjusted branch lengths must be positive"):
+        cluster_tree(source, tmp_path / "out")

@@ -10,6 +10,8 @@ def fastgreedy_membership(
     num_clusters: int | None,
 ) -> tuple[list[int], int, float]:
     dendrogram = graph.community_fastgreedy(weights="weight")
+    # igraph's VertexDendrogram.as_clustering is untyped in the shipped stubs, so the result
+    # arrives as Unknown; Any isolates that one library boundary rather than the module.
     clustering: Any = (
         dendrogram.as_clustering()
         if num_clusters is None
