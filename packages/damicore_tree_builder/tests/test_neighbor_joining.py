@@ -1,10 +1,13 @@
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
 import pytest
 
+import damicore_tree_builder.api as api
+import damicore_tree_builder.artifacts as artifacts
 from damicore_tree_builder import Tree, TreeBuilderError, build_tree, neighbor_joining
 from damicore_tree_builder.newick import to_newick
 
@@ -191,3 +194,126 @@ def test_labels_schema_rejects_coercion_and_extra_fields(tmp_path: Path) -> None
     )
     with pytest.raises(TreeBuilderError, match="labels"):
         build_tree(tmp_path / "distance.npy", labels, tmp_path / "tree-output")
+
+
+def _artifacts(
+    tmp_path: Path, ids: list[str], labels: list[str] | None = None
+) -> tuple[Path, Path]:
+    """Write the matrix and labels artifacts build_tree reads, sized to `ids`."""
+    size = len(ids)
+    matrix = np.full((size, size), 2.0, dtype=np.float64)
+    np.fill_diagonal(matrix, 0.0)  # pyright: ignore[reportUnknownMemberType]
+    matrix_path = tmp_path / "distance.npy"
+    np.save(matrix_path, matrix, allow_pickle=False)  # pyright: ignore[reportUnknownMemberType]
+    labels_path = tmp_path / "labels.json"
+    labels_path.write_text(
+        json.dumps({"schema_version": 1, "object_ids": ids, "labels": labels or ids}),
+        encoding="utf-8",
+    )
+    return matrix_path, labels_path
+
+
+# object_ids and labels index the same objects positionally, so any of these breaks that pairing.
+INCONSISTENT_LABEL_ARTIFACTS = [
+    pytest.param(["a", "b"], ["only-one"], id="length-mismatch"),
+    pytest.param(["a", "a"], ["A", "B"], id="duplicate-object-ids"),
+    pytest.param(["a", "b"], ["same", "same"], id="duplicate-labels"),
+]
+
+
+@pytest.mark.parametrize(("ids", "labels"), INCONSISTENT_LABEL_ARTIFACTS)
+def test_an_inconsistent_labels_artifact_is_rejected(
+    tmp_path: Path, ids: list[str], labels: list[str]
+) -> None:
+    """Schema validation accepts any two string tuples; their pairing is a separate contract."""
+    matrix_path, labels_path = _artifacts(tmp_path, ids, labels)
+    with pytest.raises(TreeBuilderError, match="equal length and unique") as raised:
+        build_tree(matrix_path, labels_path, tmp_path / "out")
+    assert raised.value.code == "artifact_validation_error"
+
+
+def test_an_unreadable_matrix_artifact_is_reported_as_a_typed_error(tmp_path: Path) -> None:
+    """np.load raises OSError or ValueError on a file that is not a valid .npy; the caller
+    must receive this package's typed error instead."""
+    _, labels_path = _artifacts(tmp_path, ["a", "b"])
+    corrupt = tmp_path / "corrupt.npy"
+    corrupt.write_bytes(b"not a numpy file")
+    with pytest.raises(TreeBuilderError, match="unreadable") as raised:
+        build_tree(corrupt, labels_path, tmp_path / "out")
+    assert raised.value.code == "artifact_validation_error"
+
+
+def test_a_non_float64_matrix_artifact_is_rejected(tmp_path: Path) -> None:
+    """The in-memory API converts, but a persisted matrix is memory-mapped and used as it
+    lies on disk, so its dtype is part of the artifact contract."""
+    ids = ["a", "b"]
+    matrix_path = tmp_path / "distance.npy"
+    np.save(  # pyright: ignore[reportUnknownMemberType]
+        matrix_path, np.zeros((2, 2), dtype=np.float32), allow_pickle=False
+    )
+    labels_path = tmp_path / "labels.json"
+    labels_path.write_text(
+        json.dumps({"schema_version": 1, "object_ids": ids, "labels": ids}), encoding="utf-8"
+    )
+    with pytest.raises(TreeBuilderError, match="float64") as raised:
+        build_tree(matrix_path, labels_path, tmp_path / "out")
+    assert raised.value.code == "distance_matrix_validation_error"
+
+
+# build_tree re-reads both artifacts after writing them, so each row corrupts one of them
+# between the write and that read: the check exists to catch a serializer that silently
+# dropped content, which is invisible to the in-memory tree it was built from.
+def _drop_a_leaf(tree_path: Path, newick_path: Path) -> None:
+    payload = json.loads(tree_path.read_text(encoding="utf-8"))
+    payload["nodes"] = [node for node in payload["nodes"] if node["kind"] != "leaf"]
+    tree_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _strip_the_newick_terminator(tree_path: Path, newick_path: Path) -> None:
+    newick_path.write_text(
+        newick_path.read_text(encoding="utf-8").replace(";", ""), encoding="utf-8"
+    )
+
+
+PERSISTED_ARTIFACT_CORRUPTIONS = [
+    pytest.param(_drop_a_leaf, "lost leaves", id="tree-json-missing-a-leaf"),
+    pytest.param(_strip_the_newick_terminator, "Newick", id="newick-without-terminator"),
+]
+
+
+@pytest.mark.parametrize(("corrupt", "discriminator"), PERSISTED_ARTIFACT_CORRUPTIONS)
+def test_a_corrupted_persisted_artifact_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    corrupt: Callable[[Path, Path], None],
+    discriminator: str,
+) -> None:
+    matrix_path, labels_path = _artifacts(tmp_path, ["a", "b", "c"])
+    real_write = api.write_tree_artifacts
+
+    def corrupting_write(tree: Tree, destination: Path) -> tuple[Path, Path]:
+        tree_path, newick_path = real_write(tree, destination)
+        corrupt(tree_path, newick_path)
+        return tree_path, newick_path
+
+    monkeypatch.setattr(api, "write_tree_artifacts", corrupting_write)
+    with pytest.raises(TreeBuilderError, match=discriminator) as raised:
+        build_tree(matrix_path, labels_path, tmp_path / "out")
+    assert raised.value.code == "artifact_validation_error"
+
+
+def test_a_failed_tree_write_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both artifacts go through the same atomic helper, so a failure at the rename must not
+    leave the partial file behind."""
+    matrix_path, labels_path = _artifacts(tmp_path, ["a", "b", "c"])
+    output = tmp_path / "out"
+
+    def failing_replace(src: object, dst: object) -> None:
+        raise OSError("simulated failure while committing the tree")
+
+    monkeypatch.setattr(artifacts.os, "replace", failing_replace)
+    with pytest.raises(OSError):
+        build_tree(matrix_path, labels_path, output)
+    assert not list(output.glob(".tree.*"))
