@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
 import numpy as np
+import numpy.typing as npt
 from pydantic import BaseModel, ValidationError
 
 from damicore_distance.artifacts import (
@@ -134,7 +135,7 @@ def _worker(
     return shard_index, left, right, values
 
 
-def _validate_matrix(matrix: np.ndarray[Any, Any], block_size: int = 512) -> None:
+def _validate_matrix(matrix: npt.NDArray[np.float64], block_size: int = 512) -> None:
     if matrix.dtype != np.float64 or matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
         raise DistanceError(
             "Distance matrix has invalid shape or dtype",
@@ -154,7 +155,12 @@ def _validate_matrix(matrix: np.ndarray[Any, Any], block_size: int = 512) -> Non
                     "Distance matrix diagonal must be exactly zero",
                     code="distance_matrix_validation_error",
                 )
-            if not np.array_equal(matrix[row, :], matrix[:, row]):
+            # pyright: ignore is on np.array_equal, whose numpy stub is partially
+            # unknown under strict mode; the arrays themselves are fully typed.
+            symmetric = np.array_equal(  # pyright: ignore[reportUnknownMemberType]
+                matrix[row, :], matrix[:, row]
+            )
+            if not bool(symmetric):
                 raise DistanceError(
                     "Distance matrix must be bitwise symmetric",
                     code="distance_matrix_validation_error",

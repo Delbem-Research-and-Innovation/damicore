@@ -91,14 +91,14 @@ def test_resume_fingerprint_projects_only_the_compat_subset() -> None:
 
 
 def test_incomplete_run_resumes_despite_environment_change(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = generate_csv(
         tmp_path / "dataset.csv", rows=24, columns=8, clusters=2, seed=42
     )
     run_dir = tmp_path / "run"
 
-    def fail_cluster(*_args, **_kwargs):
+    def fail_cluster(*_args: object, **_kwargs: object) -> object:
         raise api.ClusterizerError("injected", code="clusterization_error")
 
     monkeypatch.setattr(api, "cluster_tree", fail_cluster)
@@ -119,14 +119,14 @@ def test_incomplete_run_resumes_despite_environment_change(
 
 
 def test_incomplete_run_rejects_incompatible_runtime(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = generate_csv(
         tmp_path / "dataset.csv", rows=24, columns=8, clusters=2, seed=42
     )
     run_dir = tmp_path / "run"
 
-    def fail_cluster(*_args, **_kwargs):
+    def fail_cluster(*_args: object, **_kwargs: object) -> object:
         raise api.ClusterizerError("injected", code="clusterization_error")
 
     monkeypatch.setattr(api, "cluster_tree", fail_cluster)

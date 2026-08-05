@@ -9,24 +9,48 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
+  # Specification section 25.3. Resolves the newest versions inside the declared ranges and
+  # reports; it never commits an updated lock.
   audit:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: astral-sh/setup-uv@v6.6.1
         with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: false
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+        with:
+          sync: none
       - run: uv lock --upgrade
       - run: uv sync --all-packages --group dev
-      - run: uv run pytest --cov
-      - run: make coverage-critical
+      - run: make test
       - run: uv run pip-audit
-      - run: uv run python benchmarks/benchmark_large_csv.py --directory /tmp/damicore-benchmark --rows 100 --skip-large
-      - name: Open issue on failure
+      # The object sweep required by specification section 24.4 runs in full (~3 minutes).
+      # The 2 GiB normalization benchmark of that section is skipped here: it needs a
+      # multi-gigabyte working set, and this lane is a dependency audit, not a capacity run.
+      - name: Benchmark the specified object counts
+        run: >
+          uv run python benchmarks/benchmark_large_csv.py
+          --directory /tmp/damicore-benchmark --rows 100 --skip-large
+
+      - name: Report the failure on the tracking issue
         if: failure()
+        # One issue per failure mode, not one per week: a persistent failure comments on the
+        # open report instead of opening a duplicate every Monday.
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue create --title "Weekly dependency audit failed" --body "See workflow run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          TITLE: Weekly dependency audit failed
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          existing="$(gh issue list --state open --search "$TITLE in:title" \
+            --json number --jq 'first | .number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Audit failed again: $RUN_URL"
+          else
+            gh issue create --title "$TITLE" --body "See workflow run $RUN_URL"
+          fi

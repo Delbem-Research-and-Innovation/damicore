@@ -29,7 +29,7 @@ def cluster_tree(
         source.graph,
         settings.num_clusters,
     )
-    names = list(source.graph.vs["name"])
+    names = source.vertex_names
     raw_leaf_groups: dict[int, list[str]] = {}
     for vertex_index, community in enumerate(membership):
         name = str(names[vertex_index])

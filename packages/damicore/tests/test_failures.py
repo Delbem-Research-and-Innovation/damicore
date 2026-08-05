@@ -1,7 +1,8 @@
 import json
+from pathlib import Path
 
 import pytest
-from damicore_clusterizer import ClusterizerError
+from damicore_clusterizer import ClusterizerError, ClusterResult
 from damicore_distance import DistanceError
 from damicore_normalizer import NormalizerError
 from damicore_tree_builder import TreeBuilderError
@@ -13,6 +14,7 @@ from damicore import (
     ExecutionConfig,
     OutputDirectoryConflictError,
     ResourceLimitError,
+    ResourceLimits,
     estimate,
     load_result,
     run,
@@ -26,35 +28,41 @@ from damicore.errors import (
 )
 from damicore.progress import distance_progress
 
+pytestmark = pytest.mark.unit
 
-def _csv(tmp_path):
+
+def _csv(tmp_path: Path) -> Path:
     path = tmp_path / "input.csv"
     path.write_text("a,b,c\naa,ab,zz\naa,ac,zy\n", encoding="utf-8")
     return path
 
 
+# Each row rejects one configuration option before the CSV is opened. Naming the option
+# rather than splatting a dict keeps every call checked against estimate's signature.
 @pytest.mark.parametrize(
-    ("kwargs", "message"),
+    ("split", "delimiter", "encoding", "message"),
     [
-        ({"split": "invalid"}, "split"),
-        ({"delimiter": "::"}, "delimiter"),
-        ({"encoding": "not-an-encoding"}, "encoding"),
+        pytest.param("invalid", ",", "utf-8", "split", id="split"),
+        pytest.param("columns", "::", "utf-8", "delimiter", id="delimiter"),
+        pytest.param("columns", ",", "not-an-encoding", "encoding", id="encoding"),
     ],
 )
-def test_invalid_configuration_fails_before_csv_read(tmp_path, kwargs, message):
+def test_invalid_configuration_fails_before_csv_read(
+    tmp_path: Path, split: str, delimiter: str, encoding: str, message: str
+) -> None:
     missing = tmp_path / "missing.csv"
     with pytest.raises(ConfigurationError, match=message):
-        estimate(missing, **kwargs)
+        estimate(missing, split=split, delimiter=delimiter, encoding=encoding)
 
 
-def test_run_rejects_limits_and_conflicting_directories(tmp_path):
+def test_run_rejects_limits_and_conflicting_directories(tmp_path: Path) -> None:
     source = _csv(tmp_path)
     with pytest.raises(ResourceLimitError):
         run(
             source,
             output_dir=tmp_path / "limited",
             progress=False,
-            execution=ExecutionConfig(workers=1, limits={"max_objects": 2}),
+            execution=ExecutionConfig(workers=1, limits=ResourceLimits(max_objects=2)),
         )
     occupied = tmp_path / "occupied"
     occupied.mkdir()
@@ -64,12 +72,14 @@ def test_run_rejects_limits_and_conflicting_directories(tmp_path):
     assert (occupied / "user.txt").read_text(encoding="utf-8") == "keep"
 
 
-def test_failed_stage_is_reported_and_resumed(tmp_path, monkeypatch):
+def test_failed_stage_is_reported_and_resumed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source = _csv(tmp_path)
     output = tmp_path / "resume"
     original = api.cluster_tree
 
-    def fail_cluster(*_args, **_kwargs):
+    def fail_cluster(*_args: object, **_kwargs: object) -> ClusterResult:
         raise ClusterizerError("injected failure", code="clusterization_error")
 
     monkeypatch.setattr(api, "cluster_tree", fail_cluster)
@@ -85,7 +95,7 @@ def test_failed_stage_is_reported_and_resumed(tmp_path, monkeypatch):
     result.close()
 
 
-def test_reuse_flags_and_loader_terminal_state(tmp_path):
+def test_reuse_flags_and_loader_terminal_state(tmp_path: Path) -> None:
     source = _csv(tmp_path)
     output = tmp_path / "run"
     result = run(source, output_dir=output, progress=False, execution=ExecutionConfig(workers=1))
@@ -139,11 +149,11 @@ def test_reuse_flags_and_loader_terminal_state(tmp_path):
         (ValueError("unknown"), api.DamicoreError),
     ],
 )
-def test_stage_error_translation(error, expected):
+def test_stage_error_translation(error: Exception, expected: type[Exception]) -> None:
     assert isinstance(api._translated_stage_error(error), expected)
 
 
-def test_progress_adapter_enabled_and_disabled():
+def test_progress_adapter_enabled_and_disabled() -> None:
     callback, close = distance_progress(False)
     assert callback is None
     close()

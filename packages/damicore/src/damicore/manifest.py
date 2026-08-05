@@ -4,8 +4,9 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Literal, Self
+from typing import Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -216,3 +217,24 @@ def artifact_record(path: Path, root: Path) -> dict[str, object]:
         "size_bytes": path.stat().st_size,
         "sha256": sha256_file(path),
     }
+
+
+def json_mapping(value: object) -> dict[str, object]:
+    """Narrow a decoded JSON value to a string-keyed mapping, or an empty one.
+
+    Deserialized JSON carries no static shape, so every reader of a manifest, receipt, or
+    checkpoint would otherwise re-derive `Unknown` from `dict[str, Any]`. This is the single
+    place that crosses from `object` into a typed mapping, which keeps the readers checked
+    and confines the one unavoidable cast to a premise `isinstance` just established.
+    """
+    if not isinstance(value, dict):
+        return {}
+    entries = cast(Mapping[object, object], value)
+    return {str(key): item for key, item in entries.items()}
+
+
+def json_sequence(value: object) -> list[object]:
+    """Narrow a decoded JSON value to a list, or an empty one. See `json_mapping`."""
+    if not isinstance(value, list):
+        return []
+    return list(cast(Sequence[object], value))

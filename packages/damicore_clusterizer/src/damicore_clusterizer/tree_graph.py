@@ -39,6 +39,9 @@ class _TreeArtifact(BaseModel):
 @dataclass(frozen=True)
 class GraphInput:
     graph: ig.Graph
+    # Vertex order as igraph holds it. Exposed here so callers never read graph.vs
+    # themselves: this module is the only place that touches igraph's attribute API.
+    vertex_names: tuple[str, ...]
     object_ids: tuple[str, ...]
     labels: dict[str, str]
     shift: float
@@ -62,9 +65,15 @@ def _load_tree_graph(path: Path) -> GraphInput:
     leaves = tuple(node.id for node in nodes if node.kind == "leaf")
     if len(leaves) < 2:
         raise ClusterizerError("Tree must contain at least two leaves", code="tree_format_error")
-    if any(not isinstance(node.label, str) for node in nodes if node.kind == "leaf"):
-        raise ClusterizerError("Every leaf must have a string label", code="tree_format_error")
-    labels = {node.id: node.label for node in nodes if node.kind == "leaf"}
+    # Validate and collect in one pass: a separate `any(...)` guard establishes the invariant
+    # for a reader but not for the comprehension that follows, which then carries `str | None`.
+    labels: dict[str, str] = {}
+    for node in nodes:
+        if node.kind != "leaf":
+            continue
+        if not isinstance(node.label, str):
+            raise ClusterizerError("Every leaf must have a string label", code="tree_format_error")
+        labels[node.id] = node.label
     root_edges = [edge for edge in edges if edge.source == root_id]
     if len(root_edges) != 2:
         raise ClusterizerError("Tree root must have exactly two children", code="tree_format_error")
@@ -100,7 +109,13 @@ def _load_tree_graph(path: Path) -> GraphInput:
         raise ClusterizerError("Tree graph is disconnected", code="tree_format_error")
     graph.vs["name"] = retained_nodes
     graph.es["weight"] = [1.0 / length for length in adjusted]
-    return GraphInput(graph=graph, object_ids=leaves, labels=labels, shift=shift)
+    return GraphInput(
+        graph=graph,
+        vertex_names=tuple(retained_nodes),
+        object_ids=leaves,
+        labels=labels,
+        shift=shift,
+    )
 
 
 def load_tree_graph(path: Path) -> GraphInput:

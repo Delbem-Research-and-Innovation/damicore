@@ -1,18 +1,27 @@
 import hashlib
 import json
+from pathlib import Path
+from typing import Literal
 
 import pytest
 
 from damicore_normalizer import NormalizationConfig, NormalizerError, normalize_csv
 
+pytestmark = pytest.mark.unit
 
-def _csv(tmp_path):
+
+def _split(value: str) -> Literal["columns", "rows"]:
+    """Narrow a parametrized string to the literal the config contract declares."""
+    return "rows" if value == "rows" else "columns"
+
+
+def _csv(tmp_path: Path) -> Path:
     path = tmp_path / "input.csv"
     path.write_text('name,note\nAna,"a,b"\nBia,""\n', encoding="utf-8")
     return path
 
 
-def test_columns_are_canonical_and_chunk_independent(tmp_path):
+def test_columns_are_canonical_and_chunk_independent(tmp_path: Path) -> None:
     source = _csv(tmp_path)
     first = normalize_csv(
         source,
@@ -38,7 +47,7 @@ def test_columns_are_canonical_and_chunk_independent(tmp_path):
     assert manifest["input"]["size_bytes"] == source.stat().st_size
 
 
-def test_rows_use_positional_ids_and_arrays(tmp_path):
+def test_rows_use_positional_ids_and_arrays(tmp_path: Path) -> None:
     result = normalize_csv(
         _csv(tmp_path),
         tmp_path / "rows",
@@ -48,43 +57,66 @@ def test_rows_use_positional_ids_and_arrays(tmp_path):
     assert (tmp_path / "rows/objects/row_000001.jsonl").read_bytes() == b'["Ana","a,b"]\n'
 
 
-@pytest.mark.parametrize("text", ["a,a\n1,2\n", ",b\n1,2\n", "a,b\n"])
-def test_invalid_csv_contract_fails(tmp_path, text):
-    source = tmp_path / "bad.csv"
-    source.write_text(text, encoding="utf-8")
-    with pytest.raises(NormalizerError):
-        normalize_csv(source, tmp_path / "out")
+# Each row is one way the input contract can be violated: the CSV text (None for a path that
+# is not a file), the config overrides that make it a violation, the stable code from
+# specification section 19, and the message fragment separating it from the other violations
+# that share that code. Adding a violation is adding a row, and it fails under its own name.
+INPUT_CONTRACT_VIOLATIONS = [
+    pytest.param(
+        "a,a\n1,2\n", "columns", "csv_format_error", "unique", id="duplicate-header-names"
+    ),
+    pytest.param(",b\n1,2\n", "columns", "csv_format_error", "non-empty", id="empty-header-name"),
+    pytest.param("a,b\n", "columns", "csv_format_error", "enough data rows", id="no-data-rows"),
+    pytest.param(
+        "a\n1\n2\n", "columns", "csv_format_error", "two columns", id="one-column-columns-split"
+    ),
+    pytest.param(
+        "a,b\n1,2\n",
+        "rows",
+        "csv_format_error",
+        "enough data rows",
+        id="one-row-rows-split",
+    ),
+    pytest.param(None, "columns", "input_validation_error", "regular file", id="missing-file"),
+]
 
 
-def test_output_must_be_empty(tmp_path):
+@pytest.mark.parametrize(("text", "split", "code", "discriminator"), INPUT_CONTRACT_VIOLATIONS)
+def test_input_contract_violation_reports_its_code_and_cause(
+    tmp_path: Path,
+    text: str | None,
+    split: str,
+    code: str,
+    discriminator: str,
+) -> None:
+    source = tmp_path / "input.csv"
+    if text is not None:
+        source.write_text(text, encoding="utf-8")
+    with pytest.raises(NormalizerError, match=discriminator) as raised:
+        normalize_csv(source, tmp_path / "out", config=NormalizationConfig(split=_split(split)))
+    assert raised.value.code == code
+
+
+def test_output_must_be_empty_and_user_files_survive(tmp_path: Path) -> None:
     source = _csv(tmp_path)
     output = tmp_path / "occupied"
     output.mkdir()
     (output / "user.txt").write_text("preserve", encoding="utf-8")
-    with pytest.raises(NormalizerError):
+    with pytest.raises(NormalizerError) as raised:
         normalize_csv(source, output)
+    assert raised.value.code == "output_conflict_error"
     assert (output / "user.txt").read_text(encoding="utf-8") == "preserve"
 
 
-def test_path_and_shape_guards(tmp_path):
-    with pytest.raises(NormalizerError, match="regular file"):
-        normalize_csv(tmp_path / "missing.csv", tmp_path / "missing-out")
-    one_column = tmp_path / "one.csv"
-    one_column.write_text("a\n1\n2\n", encoding="utf-8")
-    with pytest.raises(NormalizerError, match="two columns"):
-        normalize_csv(one_column, tmp_path / "one-out")
-    one_row = tmp_path / "row.csv"
-    one_row.write_text("a,b\n1,2\n", encoding="utf-8")
-    with pytest.raises(NormalizerError, match="enough"):
-        normalize_csv(
-            one_row,
-            tmp_path / "row-out",
-            config=NormalizationConfig(split="rows"),
-        )
-
-
-def test_configuration_validation():
-    with pytest.raises(ValueError):
-        NormalizationConfig(delimiter="::")
-    with pytest.raises(LookupError):
-        NormalizationConfig(encoding="not-an-encoding")
+@pytest.mark.parametrize(
+    ("delimiter", "encoding", "expected"),
+    [
+        pytest.param("::", "utf-8", ValueError, id="multi-character-delimiter"),
+        pytest.param(",", "not-an-encoding", LookupError, id="unknown-encoding"),
+    ],
+)
+def test_configuration_rejects_an_invalid_value(
+    delimiter: str, encoding: str, expected: type[Exception]
+) -> None:
+    with pytest.raises(expected):
+        NormalizationConfig(delimiter=delimiter, encoding=encoding)

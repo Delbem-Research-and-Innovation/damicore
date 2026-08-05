@@ -1,8 +1,9 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
-from damicore_normalizer import NormalizationConfig, normalize_csv
+from damicore_normalizer import NormalizationConfig, NormalizationResult, normalize_csv
 
 import damicore_distance.api as distance_api
 from damicore_distance import (
@@ -13,8 +14,14 @@ from damicore_distance import (
 )
 from damicore_distance.ncd import normalized_compression_distance
 
+pytestmark = pytest.mark.unit
 
-def _normalized(tmp_path):
+# Mirrors damicore_distance.api._worker, which this suite wraps to inject a shard failure.
+WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], str, int, int]
+WorkerResult = tuple[int, list[int], list[int], list[float]]
+
+
+def _normalized(tmp_path: Path) -> NormalizationResult:
     source = tmp_path / "input.csv"
     source.write_text("a,b,c\naaaa,aaab,zzzz\naaaa,aaab,zzzy\n", encoding="utf-8")
     return normalize_csv(
@@ -24,13 +31,13 @@ def _normalized(tmp_path):
     )
 
 
-def test_ncd_is_not_clamped_and_zero_denominator_fails():
+def test_ncd_is_not_clamped_and_zero_denominator_fails() -> None:
     assert normalized_compression_distance(10, 20, 50) == 2.0
     with pytest.raises(DistanceError, match="denominator"):
         normalized_compression_distance(0, 0, 1)
 
 
-def test_serial_parallel_and_resumed_are_bitwise_equal(tmp_path):
+def test_serial_parallel_and_resumed_are_bitwise_equal(tmp_path: Path) -> None:
     normalized = _normalized(tmp_path)
     serial = compute_distance_matrix(
         normalized.manifest_path,
@@ -49,11 +56,11 @@ def test_serial_parallel_and_resumed_are_bitwise_equal(tmp_path):
     )
     serial_matrix = np.load(serial.matrix_path, allow_pickle=False)
     assert serial_matrix.dtype == np.float64
-    assert np.array_equal(serial_matrix, np.load(parallel.matrix_path, allow_pickle=False))
-    assert np.array_equal(serial_matrix, np.load(resumed.matrix_path, allow_pickle=False))
+    assert np.array_equal(serial_matrix, np.load(parallel.matrix_path, allow_pickle=False))  # pyright: ignore[reportUnknownMemberType]
+    assert np.array_equal(serial_matrix, np.load(resumed.matrix_path, allow_pickle=False))  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_diagnostics_and_corruption_detection(tmp_path):
+def test_diagnostics_and_corruption_detection(tmp_path: Path) -> None:
     normalized = _normalized(tmp_path)
     result = compute_distance_matrix(
         normalized.manifest_path,
@@ -71,9 +78,9 @@ def test_diagnostics_and_corruption_detection(tmp_path):
         compute_distance_matrix(normalized.manifest_path, tmp_path / "corrupt")
 
 
-def test_gzip_progress_view_and_resume_guards(tmp_path):
+def test_gzip_progress_view_and_resume_guards(tmp_path: Path) -> None:
     normalized = _normalized(tmp_path)
-    calls = []
+    calls: list[tuple[int, int, str]] = []
     result = compute_distance_matrix(
         normalized.manifest_path,
         tmp_path / "gzip",
@@ -82,7 +89,7 @@ def test_gzip_progress_view_and_resume_guards(tmp_path):
     )
     assert calls[-1] == (3, 3, "distance")
     view = DistanceMatrixView(result.matrix_path, ["a", "b", "c"])
-    assert float(view[0, 0]) == 0.0
+    assert view[0, 0] == 0.0
     assert view.to_pandas(force=True).shape == (3, 3)
     view.close()
     with pytest.raises(ValueError, match="reload"):
@@ -95,7 +102,7 @@ def test_gzip_progress_view_and_resume_guards(tmp_path):
         )
 
 
-def test_manifest_and_checkpoint_corruption_fail(tmp_path):
+def test_manifest_and_checkpoint_corruption_fail(tmp_path: Path) -> None:
     bad = tmp_path / "bad.json"
     bad.write_text("not-json", encoding="utf-8")
     with pytest.raises(DistanceError, match="manifest"):
@@ -118,7 +125,7 @@ def test_manifest_and_checkpoint_corruption_fail(tmp_path):
         )
 
 
-def test_manifest_schema_rejects_extra_fields(tmp_path):
+def test_manifest_schema_rejects_extra_fields(tmp_path: Path) -> None:
     normalized = _normalized(tmp_path)
     manifest = json.loads(normalized.manifest_path.read_text(encoding="utf-8"))
     manifest["unexpected"] = True
@@ -127,7 +134,7 @@ def test_manifest_schema_rejects_extra_fields(tmp_path):
         compute_distance_matrix(normalized.manifest_path, tmp_path / "invalid-schema")
 
 
-def test_resume_rejects_symmetric_finite_matrix_corruption(tmp_path):
+def test_resume_rejects_symmetric_finite_matrix_corruption(tmp_path: Path) -> None:
     normalized = _normalized(tmp_path)
     output = tmp_path / "run"
     result = compute_distance_matrix(
@@ -148,14 +155,16 @@ def test_resume_rejects_symmetric_finite_matrix_corruption(tmp_path):
 
 
 @pytest.mark.parametrize("fail_after", [0, 1, 2])
-def test_resume_after_each_shard_boundary_matches_clean_run(tmp_path, monkeypatch, fail_after):
+def test_resume_after_each_shard_boundary_matches_clean_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_after: int
+) -> None:
     normalized = _normalized(tmp_path)
     config = DistanceConfig(workers=1, pairs_per_shard=1)
     clean = compute_distance_matrix(normalized.manifest_path, tmp_path / "clean", config=config)
     original_worker = distance_api._worker
     calls = 0
 
-    def fail_at_boundary(arguments):
+    def fail_at_boundary(arguments: WorkerArguments) -> WorkerResult:
         nonlocal calls
         if calls == fail_after:
             raise RuntimeError("injected shard interruption")
@@ -169,7 +178,7 @@ def test_resume_after_each_shard_boundary_matches_clean_run(tmp_path, monkeypatc
     monkeypatch.setattr(distance_api, "_worker", original_worker)
 
     resumed = compute_distance_matrix(normalized.manifest_path, interrupted, config=config)
-    assert np.array_equal(
+    assert np.array_equal(  # pyright: ignore[reportUnknownMemberType]
         np.load(clean.matrix_path, allow_pickle=False),
         np.load(resumed.matrix_path, allow_pickle=False),
     )

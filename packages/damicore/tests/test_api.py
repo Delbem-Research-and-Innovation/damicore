@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -14,15 +15,17 @@ from damicore import (
     run,
 )
 
+pytestmark = pytest.mark.unit
 
-def _csv(tmp_path):
+
+def _csv(tmp_path: Path) -> Path:
     path = tmp_path / "input.csv"
     path.write_text("a,b,c\naaaa,aaab,zzzz\naaaa,aaac,zzzy\n", encoding="utf-8")
     return path
 
 
 @pytest.mark.parametrize("split", ["columns", "rows"])
-def test_complete_pipeline_reuse_save_and_load(tmp_path, split):
+def test_complete_pipeline_reuse_save_and_load(tmp_path: Path, split: str) -> None:
     source = _csv(tmp_path)
     preview = estimate(source, split=split, execution=ExecutionConfig(workers=1))
     assert preview.within_limits
@@ -55,7 +58,7 @@ def test_complete_pipeline_reuse_save_and_load(tmp_path, split):
     reused.close()
 
 
-def test_limits_materialization_and_corruption(tmp_path):
+def test_limits_materialization_and_corruption(tmp_path: Path) -> None:
     source = _csv(tmp_path)
     limited = estimate(
         source,
@@ -84,7 +87,7 @@ def test_limits_materialization_and_corruption(tmp_path):
 
 
 @pytest.mark.parametrize("malicious_path", ["../escape.bin", "/tmp/escape.bin"])
-def test_save_rejects_manifest_paths_outside_roots(tmp_path, malicious_path):
+def test_save_rejects_manifest_paths_outside_roots(tmp_path: Path, malicious_path: str) -> None:
     output = tmp_path / "run"
     result = run(
         _csv(tmp_path),
@@ -107,7 +110,7 @@ def test_save_rejects_manifest_paths_outside_roots(tmp_path, malicious_path):
     result.close()
 
 
-def test_save_revalidates_artifact_bytes_and_symlinks(tmp_path):
+def test_save_revalidates_artifact_bytes_and_symlinks(tmp_path: Path) -> None:
     output = tmp_path / "run"
     result = run(
         _csv(tmp_path),
@@ -142,7 +145,7 @@ def test_save_revalidates_artifact_bytes_and_symlinks(tmp_path):
     result.close()
 
 
-def test_load_result_rejects_extra_manifest_fields(tmp_path):
+def test_load_result_rejects_extra_manifest_fields(tmp_path: Path) -> None:
     output = tmp_path / "run"
     result = run(
         _csv(tmp_path),

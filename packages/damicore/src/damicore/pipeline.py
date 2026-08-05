@@ -4,6 +4,7 @@ import logging
 import platform
 import time
 import zlib
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,14 @@ from typing import Any
 from pydantic import ValidationError
 
 from damicore.errors import ArtifactValidationError, CheckpointMismatchError
-from damicore.manifest import PipelineCheckpoint, artifact_record, atomic_json, sha256_file
+from damicore.manifest import (
+    PipelineCheckpoint,
+    artifact_record,
+    atomic_json,
+    json_mapping,
+    json_sequence,
+    sha256_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +112,7 @@ class PipelineJournal:
 
     def transition(self, state: str) -> None:
         self.manifest["status"] = state
-        self.manifest["updated_at"] = _utc_now()
+        self.manifest["updated_at"] = utc_now()
         self.manifest["stages"] = self.receipts
         atomic_json(self.manifest_path, self.manifest)
 
@@ -113,7 +121,7 @@ class PipelineJournal:
         started = time.monotonic()
         self.receipts[stage] = {
             "status": "running",
-            "started_at": _utc_now(),
+            "started_at": utc_now(),
             "finished_at": None,
             "runtime": self.runtime,
             "inputs": [self._input_record(path) for path in inputs],
@@ -135,7 +143,7 @@ class PipelineJournal:
         receipt.update(
             {
                 "status": "completed",
-                "finished_at": _utc_now(),
+                "finished_at": utc_now(),
                 "outputs": [self._record(path) for path in outputs],
                 "metrics": {**metrics, "seconds": time.monotonic() - started},
             }
@@ -146,16 +154,17 @@ class PipelineJournal:
         logger.info("stage_completed", extra={"run_id": self.run_id, "stage": stage, **metrics})
 
     def reusable(self, stage: str) -> bool:
-        receipt = self.receipts.get(stage)
-        if not isinstance(receipt, dict) or receipt.get("status") != "completed":
+        receipt = json_mapping(self.receipts.get(stage))
+        if receipt.get("status") != "completed":
             return False
-        recorded = receipt.get("runtime")
-        if not isinstance(recorded, dict) or resume_fingerprint(recorded) != self._resume_identity:
+        recorded = {key: str(item) for key, item in json_mapping(receipt.get("runtime")).items()}
+        if not recorded or resume_fingerprint(recorded) != self._resume_identity:
             raise CheckpointMismatchError(f"Runtime changed for stage {stage}")
-        outputs = receipt.get("outputs")
-        if not isinstance(outputs, list) or not outputs:
+        outputs = json_sequence(receipt.get("outputs"))
+        if not outputs:
             raise CheckpointMismatchError(f"Stage {stage} has no output receipt")
-        for record in outputs:
+        for entry in outputs:
+            record = json_mapping(entry)
             path = self._resolve_record(record)
             if (
                 not path.is_file()
@@ -184,7 +193,7 @@ class PipelineJournal:
             "sha256": sha256_file(resolved),
         }
 
-    def _resolve_record(self, record: dict[str, Any]) -> Path:
+    def _resolve_record(self, record: dict[str, object]) -> Path:
         relative = Path(str(record.get("path", "")))
         path = (self.run_dir / relative).resolve()
         if (
@@ -197,7 +206,10 @@ class PipelineJournal:
         return path
 
 
-def _utc_now() -> str:
-    from datetime import UTC, datetime
+def utc_now() -> str:
+    """Return the current instant as a UTC ISO-8601 string.
 
+    Every timestamp written into a run record comes from here, so a manifest, a receipt and a
+    report cannot disagree about the clock or the offset they were stamped with.
+    """
     return datetime.now(UTC).isoformat()

@@ -6,11 +6,11 @@ import json
 import logging
 import shutil
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from damicore_clusterizer import (
     ClusterConfig,
@@ -68,19 +68,21 @@ from damicore.manifest import (
     RunManifest,
     artifact_record,
     atomic_json,
+    json_mapping,
     sha256_file,
 )
-from damicore.pipeline import PipelineJournal, resume_fingerprint, runtime_fingerprint
+from damicore.pipeline import (
+    PipelineJournal,
+    resume_fingerprint,
+    runtime_fingerprint,
+    utc_now,
+)
 from damicore.progress import distance_progress
 from damicore.result import DamicoreResult, RunReport, artifact_paths
 
 SCHEMA_VERSION = 1
 VERSION = "0.1.0"
 logger = logging.getLogger(__name__)
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _execution(execution: ExecutionConfig | None) -> ExecutionConfig:
@@ -90,15 +92,35 @@ def _execution(execution: ExecutionConfig | None) -> ExecutionConfig:
         raise ConfigurationError(str(exc)) from exc
 
 
+# The public API takes these as `str` so a caller gets ConfigurationError rather than a
+# TypeError, but every stage config declares them as literals. Validating by *returning* the
+# literal makes the narrowing part of the contract, so no call site needs a suppression and
+# the rejection message has one definition.
+def _validated_split(split: str) -> Literal["columns", "rows"]:
+    if split == "columns":
+        return "columns"
+    if split == "rows":
+        return "rows"
+    raise ConfigurationError("split must be exactly 'columns' or 'rows'")
+
+
+def _validated_compressor(compressor: str) -> Literal["zlib", "gzip"]:
+    if compressor == "zlib":
+        return "zlib"
+    if compressor == "gzip":
+        return "gzip"
+    raise ConfigurationError("compressor must be exactly 'zlib' or 'gzip'")
+
+
 def _normalization_config(
-    split: str,
+    split: Literal["columns", "rows"],
     delimiter: str,
     encoding: str,
     execution: ExecutionConfig,
 ) -> NormalizationConfig:
     try:
         return NormalizationConfig(
-            split=split,  # type: ignore[arg-type] -- public API validates the string
+            split=split,
             delimiter=delimiter,
             encoding=encoding,
             chunk_rows=execution.csv_chunk_rows,
@@ -118,13 +140,12 @@ def estimate(
     execution: ExecutionConfig | None = None,
 ) -> ResourceEstimate:
     """Inspect exact resource requirements without creating run artifacts."""
-    if split not in ("columns", "rows"):
-        raise ConfigurationError("split must be exactly 'columns' or 'rows'")
+    checked_split = _validated_split(split)
     settings = _execution(execution)
-    _normalization_config(split, delimiter, encoding, settings)
+    _normalization_config(checked_split, delimiter, encoding, settings)
     return preflight(
         csv_path,
-        split=split,  # type: ignore[arg-type] -- validated above
+        split=checked_split,
         delimiter=delimiter,
         encoding=encoding,
         keep_normalized=keep_normalized,
@@ -238,7 +259,8 @@ def _verify_cross_artifacts(
 
 
 def _matrix_statistics(path: Path, block_size: int = 512) -> tuple[float, float, int]:
-    matrix = np.load(path, mmap_mode="r", allow_pickle=False)
+    # np.load is untyped; bind the result once so the block arithmetic below is checked.
+    matrix: npt.NDArray[np.float64] = np.load(path, mmap_mode="r", allow_pickle=False)
     minimum = float("inf")
     maximum = float("-inf")
     out_of_range = 0
@@ -247,7 +269,11 @@ def _matrix_statistics(path: Path, block_size: int = 512) -> tuple[float, float,
         block = matrix[start:stop]
         minimum = min(minimum, float(np.min(block)))
         maximum = max(maximum, float(np.max(block)))
-        out_of_range += int(np.count_nonzero(np.logical_or(block < 0, block > 1)))
+        # np.count_nonzero's stub is partially unknown under strict mode; the block is typed.
+        outside = np.count_nonzero(  # pyright: ignore[reportUnknownMemberType]
+            np.logical_or(block < 0, block > 1)
+        )
+        out_of_range += int(outside)
     return minimum, maximum, out_of_range
 
 
@@ -262,9 +288,9 @@ def _peak_rss() -> int | None:
 
 
 def _stage_seconds(journal: PipelineJournal, stage: str) -> float:
-    receipt = journal.receipts.get(stage, {})
-    metrics = receipt.get("metrics", {}) if isinstance(receipt, dict) else {}
-    return float(metrics.get("seconds", 0.0)) if isinstance(metrics, dict) else 0.0
+    metrics = json_mapping(json_mapping(journal.receipts.get(stage)).get("metrics"))
+    seconds = metrics.get("seconds", 0.0)
+    return float(seconds) if isinstance(seconds, (int, float)) else 0.0
 
 
 def _write_failure(
@@ -301,7 +327,7 @@ def _write_failure(
     journal.manifest.update(
         {
             "status": status,
-            "updated_at": _utc_now(),
+            "updated_at": utc_now(),
             "failed_stage": stage,
             "stages": journal.receipts,
         }
@@ -313,45 +339,74 @@ def _write_failure(
     )
 
 
+# How a stage failure becomes a public failure: the stage's own base error selects the row,
+# its code selects the class, and an unmapped code falls back to the stage's generic class.
+# The four stage bases all accept a `code`, which `type[Exception]` would not express.
+StageErrorType = (
+    type[NormalizerError] | type[DistanceError] | type[TreeBuilderError] | type[ClusterizerError]
+)
+
+_STAGE_TRANSLATIONS: tuple[
+    tuple[StageErrorType, dict[str, type[DamicoreError]], type[DamicoreError]], ...
+] = (
+    (
+        NormalizerError,
+        {
+            "output_conflict_error": OutputDirectoryConflictError,
+            "artifact_validation_error": ArtifactValidationError,
+            "csv_format_error": CSVFormatError,
+            "input_drift": InputValidationError,
+        },
+        NormalizationError,
+    ),
+    (
+        DistanceError,
+        {
+            "checkpoint_mismatch_error": CheckpointMismatchError,
+            "output_directory_conflict_error": OutputDirectoryConflictError,
+            "artifact_validation_error": ArtifactValidationError,
+            "compression_error": CompressionError,
+            "distance_matrix_validation_error": DistanceMatrixValidationError,
+        },
+        DistanceComputationError,
+    ),
+    (
+        TreeBuilderError,
+        {
+            "output_directory_conflict_error": OutputDirectoryConflictError,
+            "artifact_validation_error": ArtifactValidationError,
+            "tree_format_error": TreeFormatError,
+        },
+        TreeBuildError,
+    ),
+    (
+        ClusterizerError,
+        {
+            "output_directory_conflict_error": OutputDirectoryConflictError,
+            "tree_format_error": TreeFormatError,
+        },
+        ClusterizationError,
+    ),
+)
+
+# Specification section 19 defines a public code as the class name in snake_case, which
+# DamicoreError already derives. A stage code must therefore never be forwarded, or the
+# public code would report the stage's internal vocabulary instead of the raised class.
+# input_drift is that section's single sanctioned specialization.
+_PRESERVED_CODES = frozenset({"input_drift"})
+
+
 def _translated_stage_error(error: Exception, stage: str | None = None) -> DamicoreError:
-    code = getattr(error, "code", "")
-    if isinstance(error, NormalizerError):
-        if code == "output_conflict_error":
-            return OutputDirectoryConflictError(str(error), code=code)
-        if code == "artifact_validation_error":
-            return ArtifactValidationError(str(error), code=code)
-        if code == "csv_format_error":
-            return CSVFormatError(str(error), code=code, stage=stage)
-        if code == "input_drift":
-            return InputValidationError(str(error), code=code, stage=stage)
-        return NormalizationError(str(error), code=code)
-    if isinstance(error, DistanceError):
-        if code == "checkpoint_mismatch_error":
-            return CheckpointMismatchError(str(error), code=code)
-        if code == "output_directory_conflict_error":
-            return OutputDirectoryConflictError(str(error), code=code)
-        if code == "artifact_validation_error":
-            return ArtifactValidationError(str(error), code=code)
-        if code == "compression_error":
-            return CompressionError(str(error), code=code)
-        if code == "distance_matrix_validation_error":
-            return DistanceMatrixValidationError(str(error), code=code)
-        return DistanceComputationError(str(error), code=code)
-    if isinstance(error, TreeBuilderError):
-        if code == "output_directory_conflict_error":
-            return OutputDirectoryConflictError(str(error), code=code)
-        if code == "artifact_validation_error":
-            return ArtifactValidationError(str(error), code=code)
-        if code == "tree_format_error":
-            return TreeFormatError(str(error), code=code)
-        return TreeBuildError(str(error), code=code)
-    if isinstance(error, ClusterizerError):
-        if code == "output_directory_conflict_error":
-            return OutputDirectoryConflictError(str(error), code=code)
-        if code == "tree_format_error":
-            return TreeFormatError(str(error), code=code)
-        return ClusterizationError(str(error), code=code)
-    return DamicoreError(str(error))
+    code = str(getattr(error, "code", ""))
+    for base, by_code, fallback in _STAGE_TRANSLATIONS:
+        if isinstance(error, base):
+            translated = by_code.get(code, fallback)
+            return translated(
+                str(error),
+                code=code if code in _PRESERVED_CODES else None,
+                stage=stage,
+            )
+    return DamicoreError(str(error), stage=stage)
 
 
 def _artifact_inventory(run_dir: Path) -> dict[str, dict[str, object]]:
@@ -391,14 +446,12 @@ def run(
 ) -> DamicoreResult:
     """Execute, verify, and if possible resume the complete DAMICORE pipeline."""
     settings = _execution(execution)
-    if split not in ("columns", "rows"):
-        raise ConfigurationError("split must be exactly 'columns' or 'rows'")
-    if compressor not in ("zlib", "gzip"):
-        raise ConfigurationError("compressor must be exactly 'zlib' or 'gzip'")
-    normalization_config = _normalization_config(split, delimiter, encoding, settings)
+    checked_split = _validated_split(split)
+    checked_compressor = _validated_compressor(compressor)
+    normalization_config = _normalization_config(checked_split, delimiter, encoding, settings)
     try:
         distance_config = DistanceConfig(
-            compressor=compressor,  # type: ignore[arg-type] -- validated above
+            compressor=checked_compressor,
             compression_level=compression_level,
             compression_chunk_bytes=settings.compression_chunk_bytes,
             workers=settings.effective_workers,
@@ -416,7 +469,7 @@ def run(
     )
     preview = preflight(
         csv_path,
-        split=split,  # type: ignore[arg-type] -- validated above
+        split=checked_split,
         delimiter=delimiter,
         encoding=encoding,
         keep_normalized=keep_normalized,
@@ -474,10 +527,12 @@ def run(
             raise OutputDirectoryConflictError("Completed output reuse is disabled")
         if not settings.resume:
             raise OutputDirectoryConflictError("Incomplete output resume is disabled")
-        recorded_runtime = existing_manifest.get("runtime")
-        if not isinstance(recorded_runtime, dict) or resume_fingerprint(
-            recorded_runtime
-        ) != resume_fingerprint(runtime_fingerprint()):
+        recorded_runtime = {
+            key: str(item) for key, item in json_mapping(existing_manifest.get("runtime")).items()
+        }
+        if not recorded_runtime or resume_fingerprint(recorded_runtime) != resume_fingerprint(
+            runtime_fingerprint()
+        ):
             raise CheckpointMismatchError(
                 "Incomplete run was created by a different runtime fingerprint"
             )
@@ -485,7 +540,7 @@ def run(
     else:
         run_dir.mkdir(parents=True, exist_ok=True)
 
-    created_at = _utc_now()
+    created_at = utc_now()
     manifest = existing_manifest or {
         "schema_version": SCHEMA_VERSION,
         "damicore_version": VERSION,
@@ -701,8 +756,8 @@ def run(
         manifest.update(
             {
                 "status": "completed",
-                "updated_at": _utc_now(),
-                "completed_at": _utc_now(),
+                "updated_at": utc_now(),
+                "completed_at": utc_now(),
                 "objects": [
                     item.model_dump(mode="json", exclude={"relative_path"})
                     for item in normalization.objects
