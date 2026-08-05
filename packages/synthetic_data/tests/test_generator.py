@@ -1,4 +1,6 @@
 import csv
+import zlib
+from itertools import combinations
 from pathlib import Path
 
 import pytest
@@ -8,12 +10,29 @@ from synthetic_data import generate_csv
 pytestmark = pytest.mark.unit
 
 
-def _column_label_patterns(path: Path, delimiter: str = ",") -> list[tuple[str, ...]]:
-    """Return each column's sequence of cluster labels, header excluded."""
+def _objects(path: Path, axis: str) -> list[bytes]:
+    """Return the canonical bytes DAMICORE would compress: one object per column, or per row."""
     with path.open("r", encoding="utf-8", newline="") as stream:
-        rows = list(csv.reader(stream, delimiter=delimiter))
+        rows = list(csv.reader(stream))
     body = rows[1:]
-    return [tuple(row[index].split(":")[0] for row in body) for index in range(len(rows[0]))]
+    if axis == "rows":
+        return ["".join(row).encode("utf-8") for row in body]
+    return ["".join(row[index] for row in body).encode("utf-8") for index in range(len(rows[0]))]
+
+
+def _ncd(left: bytes, right: bytes) -> float:
+    """Normalized Compression Distance, computed exactly as damicore_distance does it.
+
+    Recomputed here from the standard library rather than imported: synthetic_data is test
+    infrastructure and must not depend on a stage package.
+    """
+
+    def compressed(payload: bytes) -> int:
+        stream = zlib.compressobj(level=6, wbits=31)
+        return len(stream.compress(payload)) + len(stream.flush())
+
+    cx, cy = compressed(left), compressed(right)
+    return (compressed(left + right) - min(cx, cy)) / max(cx, cy)
 
 
 def test_generate_csv_is_streaming_and_deterministic(tmp_path: Path) -> None:
@@ -44,29 +63,41 @@ def test_generate_csv_rejects_invalid_dimensions(
         generate_csv(tmp_path / "bad.csv", rows=rows, columns=columns, clusters=clusters, seed=1)
 
 
+# Both split modes are exercised: spec section 23 requires controllable groups of columns AND
+# of rows, and the pipeline is run over both. The standard e2e fixture shape is included.
 @pytest.mark.parametrize(
-    ("columns", "clusters"),
+    ("axis", "rows", "columns", "clusters"),
     [
-        pytest.param(6, 3, id="six-columns-three-clusters"),
-        pytest.param(8, 2, id="the-standard-e2e-fixture-shape"),
-        pytest.param(5, 1, id="single-cluster-degenerates-to-one-group"),
+        pytest.param("columns", 24, 8, 2, id="columns-standard-e2e-fixture"),
+        pytest.param("columns", 12, 6, 3, id="columns-three-groups"),
+        pytest.param("rows", 24, 8, 2, id="rows-standard-e2e-fixture"),
+        pytest.param("rows", 12, 6, 3, id="rows-three-groups"),
     ],
 )
-def test_generated_columns_form_exactly_the_requested_cluster_groups(
-    tmp_path: Path, columns: int, clusters: int
+def test_cluster_members_are_measurably_closer_under_ncd(
+    tmp_path: Path, axis: str, rows: int, columns: int, clusters: int
 ) -> None:
-    """The generator exists to produce data with findable structure, so the fixture must
-    actually carry it: columns split into exactly `clusters` groups by their label sequence,
-    and columns an exact multiple of `clusters` apart belong to the same group. Determinism
-    alone would still hold for structureless noise, so it cannot stand in for this."""
+    """The fixture must carry structure the pipeline can actually recover, and NCD is how it
+    looks. Asserting that group members merely share a label would certify a property no
+    compressor can see -- which is what an earlier version of this test did, while the
+    measured separation sat inside the noise.
+    """
     path = generate_csv(
-        tmp_path / "clustered.csv", rows=12, columns=columns, clusters=clusters, seed=42
+        tmp_path / "clustered.csv", rows=rows, columns=columns, clusters=clusters, seed=42
     )
-    patterns = _column_label_patterns(path)
-
-    assert len(set(patterns)) == clusters
-    for index in range(columns):
-        assert patterns[index] == patterns[index % clusters]
+    objects = _objects(path, axis)
+    within = [
+        _ncd(objects[i], objects[j])
+        for i, j in combinations(range(len(objects)), 2)
+        if i % clusters == j % clusters
+    ]
+    between = [
+        _ncd(objects[i], objects[j])
+        for i, j in combinations(range(len(objects)), 2)
+        if i % clusters != j % clusters
+    ]
+    assert within and between
+    assert max(within) < min(between)
 
 
 def test_generate_csv_rejects_a_multi_character_delimiter(tmp_path: Path) -> None:
