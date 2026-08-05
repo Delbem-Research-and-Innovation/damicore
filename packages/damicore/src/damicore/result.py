@@ -84,10 +84,11 @@ class DamicoreResult:
         run_root = self.artifacts.run_dir.resolve()
         resolved_records: list[tuple[Path, ArtifactRecord]] = []
         seen_targets: set[Path] = set()
-        for key, record in manifest.artifacts.items():
+        for record in manifest.artifacts.values():
+            # key == record.path is already guaranteed by RunManifest's own validator, which
+            # ran at the model_validate_json above; re-checking it here would be a second,
+            # weaker source of truth for the same rule.
             relative = _contained_relative_path(record.path)
-            if key != record.path:
-                raise ArtifactValidationError("Artifact inventory key does not match its path")
             source = run_root.joinpath(*relative.parts)
             try:
                 resolved_source = source.resolve(strict=True)
