@@ -1,6 +1,8 @@
 import ast
+import json
 import re
 from pathlib import Path
+from typing import cast
 
 import damicore
 import damicore_clusterizer
@@ -38,7 +40,14 @@ def _version(package: str) -> str:
 def _dependencies(package: str) -> set[str]:
     declared = _project(package)["dependencies"]
     assert isinstance(declared, list)
-    return {str(dependency) for dependency in declared}
+    return {str(dependency) for dependency in cast(list[object], declared)}
+
+
+def _classifiers(package: str) -> list[str]:
+    declared = _project(package).get("classifiers", [])
+    if not isinstance(declared, list):
+        return []
+    return [str(entry) for entry in cast(list[object], declared)]
 
 
 def _release(version: str) -> tuple[int, int, int]:
@@ -57,7 +66,7 @@ def _imports(path: Path) -> set[str]:
     return names
 
 
-def test_stage_packages_do_not_import_each_other_or_orchestrator():
+def test_stage_packages_do_not_import_each_other_or_orchestrator() -> None:
     for stage in STAGES:
         source = ROOT / "packages" / stage / "src" / stage
         for module in source.glob("*.py"):
@@ -65,13 +74,13 @@ def test_stage_packages_do_not_import_each_other_or_orchestrator():
             assert not (_imports(module) & forbidden), module
 
 
-def test_orchestrator_has_no_runtime_dependency_on_synthetic_data():
+def test_orchestrator_has_no_runtime_dependency_on_synthetic_data() -> None:
     source = ROOT / "packages/damicore/src/damicore"
     for module in source.glob("*.py"):
         assert "synthetic_data" not in _imports(module), module
 
 
-def test_public_exports_are_exact():
+def test_public_exports_are_exact() -> None:
     assert damicore_normalizer.__all__ == [
         "normalize_csv",
         "NormalizationConfig",
@@ -132,7 +141,7 @@ def test_public_exports_are_exact():
     }
 
 
-def test_public_pyprojects_contain_no_workspace_paths_or_typer():
+def test_public_pyprojects_contain_no_workspace_paths_or_typer() -> None:
     for package in sorted(PUBLIC):
         text = (ROOT / "packages" / package / "pyproject.toml").read_text(
             encoding="utf-8"
@@ -143,7 +152,7 @@ def test_public_pyprojects_contain_no_workspace_paths_or_typer():
         assert "file://" not in text
 
 
-def test_third_party_runtime_dependencies_are_exact():
+def test_third_party_runtime_dependencies_are_exact() -> None:
     """Specification section 8.2 closes the runtime dependency set and its ranges."""
     expected = {
         "damicore_normalizer": {"pandas>=2.2,<4", "pydantic>=2.10,<3"},
@@ -165,14 +174,14 @@ def test_third_party_runtime_dependencies_are_exact():
         assert third_party == dependencies, package
 
 
-def test_public_packages_declare_one_lockstep_version():
+def test_public_packages_declare_one_lockstep_version() -> None:
     """Specification section 26: the five published distributions share one version."""
     versions = {package: _version(package) for package in sorted(PUBLIC)}
     assert len(set(versions.values())) == 1, versions
     assert re.fullmatch(r"\d+\.\d+\.\d+", versions["damicore"]), versions["damicore"]
 
 
-def test_orchestrator_pins_every_stage_within_the_lockstep_minor():
+def test_orchestrator_pins_every_stage_within_the_lockstep_minor() -> None:
     """A published damicore must resolve stage packages of its own compatible release.
 
     The bound is asserted relative to the declared version rather than against a literal,
@@ -197,12 +206,12 @@ def test_orchestrator_pins_every_stage_within_the_lockstep_minor():
     assert set(pinned) == {stage.replace("_", "-") for stage in STAGES}
 
 
-def test_public_packages_support_the_specified_interpreter_range():
+def test_public_packages_support_the_specified_interpreter_range() -> None:
     for package in sorted(PUBLIC):
         assert _project(package)["requires-python"] == ">=3.11,<3.15"
 
 
-def test_publish_allowlist_matches_the_public_workspace_members():
+def test_publish_allowlist_matches_the_public_workspace_members() -> None:
     """The Makefile allowlist is what CI builds; drifting from the workspace is a defect.
 
     Keeping the allowlist explicit means a new package cannot become publishable by
@@ -219,12 +228,12 @@ def test_publish_allowlist_matches_the_public_workspace_members():
         directory.name
         for directory in (ROOT / "packages").iterdir()
         if (directory / "pyproject.toml").is_file()
-        and PRIVATE_CLASSIFIER not in _project(directory.name).get("classifiers", [])
+        and PRIVATE_CLASSIFIER not in _classifiers(directory.name)
     }
     assert set(declared.group(1).split()) == publishable == PUBLIC
 
 
-def test_every_test_module_declares_a_registered_marker():
+def test_every_test_module_declares_a_registered_marker() -> None:
     """AGENTS.md requires a registered marker per suite; prose alone lets new files forget.
 
     The registered set is read from the root configuration rather than restated, so adding a
@@ -234,7 +243,10 @@ def test_every_test_module_declares_a_registered_marker():
     pytest_options = configuration["tool"]["pytest"]["ini_options"]
     declared_markers = pytest_options["markers"]
     assert isinstance(declared_markers, list)
-    registered = {str(entry).split(":", 1)[0].strip() for entry in declared_markers}
+    registered = {
+        str(entry).split(":", 1)[0].strip()
+        for entry in cast(list[object], declared_markers)
+    }
 
     modules = sorted(ROOT.glob("packages/*/tests/test_*.py")) + sorted(
         ROOT.glob("tests/*/test_*.py")
@@ -256,3 +268,37 @@ def test_every_test_module_declares_a_registered_marker():
             unregistered.append(f"{path.relative_to(ROOT)}:{found.group(1)}")
     assert not unmarked, unmarked
     assert not unregistered, unregistered
+
+
+def test_type_check_configuration_covers_every_workspace_package() -> None:
+    """Guard the type gate against silently checking nothing.
+
+    `pyrightconfig.json` cannot carry comments, so the reasoning behind its shape lives here:
+
+    - every `include` entry is a concrete path, because a mid-pattern wildcard such as
+      `packages/*/src` matches nothing and Pyright then reports success over an empty file
+      set, which is how this gate came to analyze zero files;
+    - `exclude` is declared explicitly, because Pyright's default excludes every
+      dot-directory and would otherwise put `.github/scripts` out of reach;
+    - `reportPrivateUsage` is off, because unit tests deliberately exercise internals such as
+      the stage-error translation table, and the public surface is asserted instead by
+      `test_public_exports_are_exact` above.
+    """
+    configuration = json.loads(
+        (ROOT / "pyrightconfig.json").read_text(encoding="utf-8")
+    )
+    included = configuration["include"]
+    assert isinstance(included, list)
+    entries = {str(entry) for entry in cast(list[object], included)}
+
+    for entry in sorted(entries):
+        assert "*" not in entry, entry
+        assert (ROOT / entry).is_dir(), entry
+
+    for directory in sorted((ROOT / "packages").iterdir()):
+        if not (directory / "pyproject.toml").is_file():
+            continue
+        for area in ("src", "tests"):
+            if (directory / area).is_dir():
+                relative = f"packages/{directory.name}/{area}"
+                assert relative in entries, relative

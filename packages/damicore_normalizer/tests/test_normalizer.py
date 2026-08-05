@@ -1,5 +1,7 @@
 import hashlib
 import json
+from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -8,13 +10,18 @@ from damicore_normalizer import NormalizationConfig, NormalizerError, normalize_
 pytestmark = pytest.mark.unit
 
 
-def _csv(tmp_path):
+def _split(value: str) -> Literal["columns", "rows"]:
+    """Narrow a parametrized string to the literal the config contract declares."""
+    return "rows" if value == "rows" else "columns"
+
+
+def _csv(tmp_path: Path) -> Path:
     path = tmp_path / "input.csv"
     path.write_text('name,note\nAna,"a,b"\nBia,""\n', encoding="utf-8")
     return path
 
 
-def test_columns_are_canonical_and_chunk_independent(tmp_path):
+def test_columns_are_canonical_and_chunk_independent(tmp_path: Path) -> None:
     source = _csv(tmp_path)
     first = normalize_csv(
         source,
@@ -40,7 +47,7 @@ def test_columns_are_canonical_and_chunk_independent(tmp_path):
     assert manifest["input"]["size_bytes"] == source.stat().st_size
 
 
-def test_rows_use_positional_ids_and_arrays(tmp_path):
+def test_rows_use_positional_ids_and_arrays(tmp_path: Path) -> None:
     result = normalize_csv(
         _csv(tmp_path),
         tmp_path / "rows",
@@ -55,34 +62,42 @@ def test_rows_use_positional_ids_and_arrays(tmp_path):
 # specification section 19, and the message fragment separating it from the other violations
 # that share that code. Adding a violation is adding a row, and it fails under its own name.
 INPUT_CONTRACT_VIOLATIONS = [
-    pytest.param("a,a\n1,2\n", {}, "csv_format_error", "unique", id="duplicate-header-names"),
-    pytest.param(",b\n1,2\n", {}, "csv_format_error", "non-empty", id="empty-header-name"),
-    pytest.param("a,b\n", {}, "csv_format_error", "enough data rows", id="no-data-rows"),
-    pytest.param("a\n1\n2\n", {}, "csv_format_error", "two columns", id="one-column-columns-split"),
+    pytest.param(
+        "a,a\n1,2\n", "columns", "csv_format_error", "unique", id="duplicate-header-names"
+    ),
+    pytest.param(",b\n1,2\n", "columns", "csv_format_error", "non-empty", id="empty-header-name"),
+    pytest.param("a,b\n", "columns", "csv_format_error", "enough data rows", id="no-data-rows"),
+    pytest.param(
+        "a\n1\n2\n", "columns", "csv_format_error", "two columns", id="one-column-columns-split"
+    ),
     pytest.param(
         "a,b\n1,2\n",
-        {"split": "rows"},
+        "rows",
         "csv_format_error",
         "enough data rows",
         id="one-row-rows-split",
     ),
-    pytest.param(None, {}, "input_validation_error", "regular file", id="missing-file"),
+    pytest.param(None, "columns", "input_validation_error", "regular file", id="missing-file"),
 ]
 
 
-@pytest.mark.parametrize(("text", "overrides", "code", "discriminator"), INPUT_CONTRACT_VIOLATIONS)
+@pytest.mark.parametrize(("text", "split", "code", "discriminator"), INPUT_CONTRACT_VIOLATIONS)
 def test_input_contract_violation_reports_its_code_and_cause(
-    tmp_path, text, overrides, code, discriminator
-):
+    tmp_path: Path,
+    text: str | None,
+    split: str,
+    code: str,
+    discriminator: str,
+) -> None:
     source = tmp_path / "input.csv"
     if text is not None:
         source.write_text(text, encoding="utf-8")
     with pytest.raises(NormalizerError, match=discriminator) as raised:
-        normalize_csv(source, tmp_path / "out", config=NormalizationConfig(**overrides))
+        normalize_csv(source, tmp_path / "out", config=NormalizationConfig(split=_split(split)))
     assert raised.value.code == code
 
 
-def test_output_must_be_empty_and_user_files_survive(tmp_path):
+def test_output_must_be_empty_and_user_files_survive(tmp_path: Path) -> None:
     source = _csv(tmp_path)
     output = tmp_path / "occupied"
     output.mkdir()
@@ -94,12 +109,14 @@ def test_output_must_be_empty_and_user_files_survive(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("overrides", "expected"),
+    ("delimiter", "encoding", "expected"),
     [
-        pytest.param({"delimiter": "::"}, ValueError, id="multi-character-delimiter"),
-        pytest.param({"encoding": "not-an-encoding"}, LookupError, id="unknown-encoding"),
+        pytest.param("::", "utf-8", ValueError, id="multi-character-delimiter"),
+        pytest.param(",", "not-an-encoding", LookupError, id="unknown-encoding"),
     ],
 )
-def test_configuration_rejects_an_invalid_value(overrides, expected):
+def test_configuration_rejects_an_invalid_value(
+    delimiter: str, encoding: str, expected: type[Exception]
+) -> None:
     with pytest.raises(expected):
-        NormalizationConfig(**overrides)
+        NormalizationConfig(delimiter=delimiter, encoding=encoding)

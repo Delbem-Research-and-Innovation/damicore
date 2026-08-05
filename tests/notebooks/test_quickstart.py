@@ -23,7 +23,9 @@ pytestmark = pytest.mark.notebook
 CELL_TIMEOUT_SECONDS = 300
 
 
-def test_quickstart_executes_in_installed_environment(tmp_path, monkeypatch):
+def test_quickstart_executes_in_installed_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     kernel = os.environ.get("DAMICORE_NOTEBOOK_KERNEL", "python3")
     if kernel not in KernelSpecManager().find_kernel_specs():
         pytest.skip(
@@ -43,10 +45,18 @@ def test_quickstart_executes_in_installed_environment(tmp_path, monkeypatch):
     # The kernel inherits this working directory, so the notebook cannot reach the checkout.
     monkeypatch.chdir(tmp_path)
 
-    notebook = nbformat.read(root / "notebooks/colab_quickstart.ipynb", as_version=4)
-    notebook.cells = [
+    # nbformat ships no py.typed, so its node objects are untyped; the ignores below are
+    # confined to the calls that cross that boundary.
+    notebook = nbformat.read(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        root / "notebooks/colab_quickstart.ipynb", as_version=4
+    )
+    notebook.cells = [  # pyright: ignore[reportUnknownMemberType]
         cell
-        for cell in notebook.cells
-        if "install" not in cell.metadata.get("tags", [])
+        for cell in notebook.cells  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if "install" not in cell.metadata.get("tags", [])  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     ]
-    NotebookClient(notebook, timeout=CELL_TIMEOUT_SECONDS, kernel_name=kernel).execute()
+    NotebookClient(
+        notebook,  # pyright: ignore[reportUnknownArgumentType]
+        timeout=CELL_TIMEOUT_SECONDS,
+        kernel_name=kernel,
+    ).execute()

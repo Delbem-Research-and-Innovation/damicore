@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from damicore_tree_builder.errors import TreeBuilderError
 from damicore_tree_builder.models import Tree, TreeEdge, TreeNode
@@ -41,14 +42,19 @@ def validate_matrix(
                     "Distance matrix diagonal must be exactly zero",
                     code="distance_matrix_validation_error",
                 )
-            if not np.array_equal(matrix[row, :], matrix[:, row]):
+            # pyright: ignore is on np.array_equal, whose numpy stub is partially
+            # unknown under strict mode; the arrays themselves are fully typed.
+            symmetric = np.array_equal(  # pyright: ignore[reportUnknownMemberType]
+                matrix[row, :], matrix[:, row]
+            )
+            if not bool(symmetric):
                 raise TreeBuilderError(
                     "Distance matrix must be bitwise symmetric",
                     code="distance_matrix_validation_error",
                 )
 
 
-def neighbor_joining(matrix: np.ndarray[Any, Any], labels: Sequence[str]) -> Tree:
+def neighbor_joining(matrix: npt.NDArray[np.floating[Any]], labels: Sequence[str]) -> Tree:
     """Build a deterministic Neighbor Joining tree, copying the input matrix."""
     copied = np.array(matrix, dtype=np.float64, copy=True, order="C")
     validate_matrix(copied, labels)

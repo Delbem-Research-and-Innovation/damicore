@@ -46,7 +46,7 @@ class DistanceMatrixView:
     def dtype(self) -> np.dtype[Any]:
         return self._require_open().dtype
 
-    def __getitem__(self, key: object) -> object:
+    def __getitem__(self, key: int | slice | tuple[int | slice, int | slice]) -> object:
         return self._require_open()[key]
 
     def head(self, n: int = 5) -> pd.DataFrame:

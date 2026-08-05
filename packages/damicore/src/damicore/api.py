@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from damicore_clusterizer import (
     ClusterConfig,
@@ -67,6 +68,7 @@ from damicore.manifest import (
     RunManifest,
     artifact_record,
     atomic_json,
+    json_mapping,
     sha256_file,
 )
 from damicore.pipeline import (
@@ -257,7 +259,8 @@ def _verify_cross_artifacts(
 
 
 def _matrix_statistics(path: Path, block_size: int = 512) -> tuple[float, float, int]:
-    matrix = np.load(path, mmap_mode="r", allow_pickle=False)
+    # np.load is untyped; bind the result once so the block arithmetic below is checked.
+    matrix: npt.NDArray[np.float64] = np.load(path, mmap_mode="r", allow_pickle=False)
     minimum = float("inf")
     maximum = float("-inf")
     out_of_range = 0
@@ -266,7 +269,11 @@ def _matrix_statistics(path: Path, block_size: int = 512) -> tuple[float, float,
         block = matrix[start:stop]
         minimum = min(minimum, float(np.min(block)))
         maximum = max(maximum, float(np.max(block)))
-        out_of_range += int(np.count_nonzero(np.logical_or(block < 0, block > 1)))
+        # np.count_nonzero's stub is partially unknown under strict mode; the block is typed.
+        outside = np.count_nonzero(  # pyright: ignore[reportUnknownMemberType]
+            np.logical_or(block < 0, block > 1)
+        )
+        out_of_range += int(outside)
     return minimum, maximum, out_of_range
 
 
@@ -281,9 +288,9 @@ def _peak_rss() -> int | None:
 
 
 def _stage_seconds(journal: PipelineJournal, stage: str) -> float:
-    receipt = journal.receipts.get(stage, {})
-    metrics = receipt.get("metrics", {}) if isinstance(receipt, dict) else {}
-    return float(metrics.get("seconds", 0.0)) if isinstance(metrics, dict) else 0.0
+    metrics = json_mapping(json_mapping(journal.receipts.get(stage)).get("metrics"))
+    seconds = metrics.get("seconds", 0.0)
+    return float(seconds) if isinstance(seconds, (int, float)) else 0.0
 
 
 def _write_failure(
@@ -334,8 +341,13 @@ def _write_failure(
 
 # How a stage failure becomes a public failure: the stage's own base error selects the row,
 # its code selects the class, and an unmapped code falls back to the stage's generic class.
+# The four stage bases all accept a `code`, which `type[Exception]` would not express.
+StageErrorType = (
+    type[NormalizerError] | type[DistanceError] | type[TreeBuilderError] | type[ClusterizerError]
+)
+
 _STAGE_TRANSLATIONS: tuple[
-    tuple[type[Exception], dict[str, type[DamicoreError]], type[DamicoreError]], ...
+    tuple[StageErrorType, dict[str, type[DamicoreError]], type[DamicoreError]], ...
 ] = (
     (
         NormalizerError,
@@ -515,10 +527,12 @@ def run(
             raise OutputDirectoryConflictError("Completed output reuse is disabled")
         if not settings.resume:
             raise OutputDirectoryConflictError("Incomplete output resume is disabled")
-        recorded_runtime = existing_manifest.get("runtime")
-        if not isinstance(recorded_runtime, dict) or resume_fingerprint(
-            recorded_runtime
-        ) != resume_fingerprint(runtime_fingerprint()):
+        recorded_runtime = {
+            key: str(item) for key, item in json_mapping(existing_manifest.get("runtime")).items()
+        }
+        if not recorded_runtime or resume_fingerprint(recorded_runtime) != resume_fingerprint(
+            runtime_fingerprint()
+        ):
             raise CheckpointMismatchError(
                 "Incomplete run was created by a different runtime fingerprint"
             )

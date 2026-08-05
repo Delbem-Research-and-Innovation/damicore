@@ -1,7 +1,32 @@
 {
-  "include": ["packages/*/src"],
+  "include": [
+    ".github/scripts",
+    "benchmarks",
+    "tests",
+    "packages/damicore/src",
+    "packages/damicore/tests",
+    "packages/damicore_normalizer/src",
+    "packages/damicore_normalizer/tests",
+    "packages/damicore_distance/src",
+    "packages/damicore_distance/tests",
+    "packages/damicore_tree_builder/src",
+    "packages/damicore_tree_builder/tests",
+    "packages/damicore_clusterizer/src",
+    "packages/damicore_clusterizer/tests",
+    "packages/synthetic_data/src",
+    "packages/synthetic_data/tests"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.venv",
+    "**/dist",
+    "**/htmlcov"
+  ],
+  "reportPrivateUsage": false,
   "pythonVersion": "3.11",
   "typeCheckingMode": "strict",
+  "stubPath": "stubs",
   "venvPath": ".",
   "venv": ".venv",
   "extraPaths": [

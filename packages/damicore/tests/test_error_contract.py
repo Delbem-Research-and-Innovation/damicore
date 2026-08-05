@@ -45,7 +45,7 @@ def _public_error_classes() -> list[type[DamicoreError]]:
     )
 
 
-def test_every_public_error_derives_its_code_from_its_class_name():
+def test_every_public_error_derives_its_code_from_its_class_name() -> None:
     classes = _public_error_classes()
     # Guards the discovery itself: an empty or truncated scan would pass every assertion.
     assert len(classes) >= 16, [cls.__name__ for cls in classes]
@@ -53,12 +53,12 @@ def test_every_public_error_derives_its_code_from_its_class_name():
         assert cls("boom").code == _default_code(cls.__name__), cls.__name__
 
 
-def test_default_code_conversion_handles_acronyms_and_suffixes():
+def test_default_code_conversion_handles_acronyms_and_suffixes() -> None:
     assert _default_code("CSVFormatError") == "csv_format_error"
     assert _default_code("OutputDirectoryConflictError") == "output_directory_conflict_error"
 
 
-def test_translation_reports_the_raised_class_never_the_stage_vocabulary():
+def test_translation_reports_the_raised_class_never_the_stage_vocabulary() -> None:
     """A stage's internal code must not survive into the public envelope."""
     for base, by_code, fallback in _STAGE_TRANSLATIONS:
         for code, expected in [*by_code.items(), ("an_unmapped_stage_code", fallback)]:
@@ -73,7 +73,7 @@ def test_translation_reports_the_raised_class_never_the_stage_vocabulary():
                 )
 
 
-def test_translation_of_a_stage_default_code_reports_the_public_class():
+def test_translation_of_a_stage_default_code_reports_the_public_class() -> None:
     """The stage bases default to their own code; translation must not leak it."""
     for base, default_code in STAGE_BASES.items():
         error = base("boom")
@@ -83,21 +83,21 @@ def test_translation_of_a_stage_default_code_reports_the_public_class():
         assert translated.code != default_code, base.__name__
 
 
-def test_input_drift_is_the_only_code_that_survives_translation():
+def test_input_drift_is_the_only_code_that_survives_translation() -> None:
     """Specification section 19 sanctions exactly one specialized code in 0.1."""
     assert _PRESERVED_CODES == frozenset({"input_drift"})
     translated = _translated_stage_error(NormalizerError("boom", code="input_drift"))
     assert translated.code == "input_drift"
 
 
-def test_an_unknown_stage_failure_becomes_the_base_public_error():
+def test_an_unknown_stage_failure_becomes_the_base_public_error() -> None:
     translated = _translated_stage_error(RuntimeError("boom"), stage="cluster")
     assert type(translated) is DamicoreError
     assert translated.code == "damicore_error"
     assert translated.context["stage"] == "cluster"
 
 
-def test_translation_preserves_the_message_and_records_the_stage():
+def test_translation_preserves_the_message_and_records_the_stage() -> None:
     translated = _translated_stage_error(
         NormalizerError("CSV header names must be unique", code="csv_format_error"),
         stage="normalize",

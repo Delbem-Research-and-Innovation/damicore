@@ -31,7 +31,7 @@ def test_tie_break_and_path_api_are_deterministic(tmp_path: Path) -> None:
     ids = ["a", "b", "c", "d"]
     in_memory = neighbor_joining(matrix, ids)
     matrix_path = tmp_path / "distance.npy"
-    np.save(matrix_path, matrix, allow_pickle=False)
+    np.save(matrix_path, matrix, allow_pickle=False)  # pyright: ignore[reportUnknownMemberType]
     labels_path = tmp_path / "labels.json"
     labels_path.write_text(
         json.dumps({"schema_version": 1, "object_ids": ids, "labels": ids}),
@@ -74,7 +74,7 @@ def test_a_float32_matrix_is_converted_rather_than_rejected() -> None:
 
 def test_labels_artifact_and_newick_escaping(tmp_path: Path) -> None:
     matrix = np.array([[0.0, 2.0], [2.0, 0.0]], dtype=np.float64)
-    np.save(tmp_path / "distance.npy", matrix, allow_pickle=False)
+    np.save(tmp_path / "distance.npy", matrix, allow_pickle=False)  # pyright: ignore[reportUnknownMemberType]
     labels = tmp_path / "labels.json"
     labels.write_text("not-json", encoding="utf-8")
     with pytest.raises(TreeBuilderError, match="labels"):
@@ -85,7 +85,7 @@ def test_labels_artifact_and_newick_escaping(tmp_path: Path) -> None:
 
 def test_labels_schema_rejects_coercion_and_extra_fields(tmp_path: Path) -> None:
     matrix = np.array([[0.0, 2.0], [2.0, 0.0]], dtype=np.float64)
-    np.save(tmp_path / "distance.npy", matrix, allow_pickle=False)
+    np.save(tmp_path / "distance.npy", matrix, allow_pickle=False)  # pyright: ignore[reportUnknownMemberType]
     labels = tmp_path / "labels.json"
     labels.write_text(
         json.dumps(
