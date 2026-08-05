@@ -141,6 +141,51 @@ def test_public_exports_are_exact() -> None:
     }
 
 
+def test_public_result_models_declare_the_specified_fields() -> None:
+    """Specification sections 9.3, 18.5 and 18.6 with section 26, which makes a schema part of
+    the public API. These two models are the schemas of report.json and of the paths the CLI
+    prints, so a field added or renamed here is a contract change and must be a specification
+    change first."""
+    assert list(damicore.RunReport.model_fields) == [
+        "status",
+        "failed_stage",
+        "object_count",
+        "pair_count",
+        "community_count",
+        "cluster_count",
+        "effective_workers",
+        "csv_chunk_rows",
+        "compression_chunk_bytes",
+        "pairs_per_shard",
+        "matrix_bytes",
+        "required_free_disk_bytes",
+        "peak_rss_bytes",
+        "ncd_min",
+        "ncd_max",
+        "ncd_out_of_range_count",
+        "negative_branch_count",
+        "branch_length_shift",
+        "modularity",
+        "timings_seconds",
+        "verification",
+        "warnings",
+        "error",
+    ]
+    assert list(damicore.ArtifactPaths.model_fields) == [
+        "run_dir",
+        "manifest",
+        "report",
+        "distance_matrix",
+        "labels",
+        "tree_json",
+        "tree_newick",
+        "membership",
+        "clusters",
+        "normalization_dir",
+        "diagnostics_dir",
+    ]
+
+
 def test_public_pyprojects_contain_no_workspace_paths_or_typer() -> None:
     for package in sorted(PUBLIC):
         text = (ROOT / "packages" / package / "pyproject.toml").read_text(
