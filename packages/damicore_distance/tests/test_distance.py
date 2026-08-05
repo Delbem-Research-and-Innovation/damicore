@@ -343,7 +343,9 @@ def test_a_failed_checkpoint_write_leaves_no_temporary_file(
         raise OSError("simulated failure while committing a checkpoint")
 
     monkeypatch.setattr(distance_api.os, "replace", failing_replace)
-    with pytest.raises(OSError):
+    # Discriminated: os.replace is patched process-wide, so a bare OSError could come from
+    # numpy or tempfile without _atomic_json ever being reached.
+    with pytest.raises(OSError, match="simulated failure while committing a checkpoint"):
         compute_distance_matrix(normalized.manifest_path, output, config=DistanceConfig(workers=1))
     assert not list((output / "checkpoints").glob(".*.json.*"))
 
@@ -494,3 +496,27 @@ def test_a_completed_shard_missing_from_the_matrix_is_rejected(tmp_path: Path) -
             manifest, output, config=DistanceConfig(workers=1, pairs_per_shard=1)
         )
     assert raised.value.code == "checkpoint_mismatch_error"
+
+
+@pytest.mark.parametrize("size", [0, -1, -100], ids=["zero", "negative-one", "large-negative"])
+def test_a_non_positive_compressed_size_is_rejected(size: int) -> None:
+    """A negative size makes max(cx, cy) negative, so ncd's zero-denominator guard does not
+    fire and every pair in that row becomes a finite negative distance -- which the shape,
+    finiteness, diagonal and symmetry checks all accept. The schema is the only gate."""
+    from pydantic import ValidationError as PydanticValidationError
+
+    from damicore_distance.artifacts import CompressedSizesCheckpoint
+
+    with pytest.raises(PydanticValidationError, match="greater than 0"):
+        CompressedSizesCheckpoint(identity={}, sizes=(size, 5))
+
+
+def test_the_matrix_view_close_is_idempotent(tmp_path: Path) -> None:
+    """close() runs in callers' finally blocks, so a second call must not raise."""
+    path = tmp_path / "distance.npy"
+    np.save(path, np.zeros((2, 2), dtype=np.float64), allow_pickle=False)  # pyright: ignore[reportUnknownMemberType]
+    view = DistanceMatrixView(path, ["a", "b"])
+    view.close()
+    view.close()
+    with pytest.raises(ValueError, match="closed"):
+        _ = view.shape

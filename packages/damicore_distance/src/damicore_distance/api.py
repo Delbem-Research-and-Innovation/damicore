@@ -296,9 +296,9 @@ def _load_completed_shards(
     ):
         raise DistanceError("Invalid completed shard index", code="checkpoint_mismatch_error")
     expected_keys = {str(index) for index in completed}
-    if set(checkpoint.digests) != expected_keys or any(
-        len(digest) != 64 for digest in checkpoint.digests.values()
-    ):
+    # Digest shape is already guaranteed by DistanceShardsCheckpoint's own validator, so
+    # only the key set is checked here.
+    if set(checkpoint.digests) != expected_keys:
         raise DistanceError("Invalid completed shard digests", code="checkpoint_mismatch_error")
     return {index: checkpoint.digests[str(index)] for index in completed}
 

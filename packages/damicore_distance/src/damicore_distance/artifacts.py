@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -47,7 +47,11 @@ class CompressedSizesCheckpoint(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     identity: dict[str, object]
-    sizes: tuple[int, ...]
+    # Strictly positive: a compressor always emits a header, so no object compresses to
+    # nothing. Without the bound a tampered checkpoint could carry a negative size, which
+    # makes max(cx, cy) negative -- slipping past the zero-denominator guard in ncd.py and
+    # yielding finite negative distances that every matrix validator accepts.
+    sizes: tuple[Annotated[int, Field(gt=0)], ...]
 
 
 class DistanceShardsCheckpoint(BaseModel):
