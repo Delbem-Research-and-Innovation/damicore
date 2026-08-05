@@ -13,7 +13,7 @@ def distance_progress(
         return None, lambda: None
     bar = tqdm(total=0, unit="pair", desc="distance")
 
-    def update(completed: int, total: int, message: str) -> None:  # noqa: ARG001
+    def update(completed: int, total: int, message: str) -> None:
         del message  # the bar renders its own description
         bar.total = total
         bar.n = completed
