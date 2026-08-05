@@ -93,8 +93,6 @@ def _load_tree_graph(path: Path) -> GraphInput:
     left, right = root_edges
     graph_edges.append((index[left.target], index[right.target]))
     lengths.append(left.length + right.length)
-    if not lengths:
-        raise ClusterizerError("Tree has no edges", code="tree_format_error")
     if any(not math.isfinite(length) for length in lengths):
         raise ClusterizerError("Branch lengths must be finite", code="tree_format_error")
     if len(graph_edges) != len(retained_nodes) - 1:
