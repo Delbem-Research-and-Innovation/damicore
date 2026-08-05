@@ -501,6 +501,9 @@ class RunReport(BaseModel):
     community_count: int | None
     cluster_count: int | None
     effective_workers: int
+    csv_chunk_rows: int
+    compression_chunk_bytes: int
+    pairs_per_shard: int
     matrix_bytes: int
     required_free_disk_bytes: int
     peak_rss_bytes: int | None
@@ -517,6 +520,8 @@ class RunReport(BaseModel):
 ~~~
 
 No DamicoreResult retornado por run ou load_result, report.status é sempre completed. Reports failed/interrupted existem no disco para diagnóstico e retomada, mas load_result os rejeita.
+
+Os campos csv_chunk_rows, compression_chunk_bytes e pairs_per_shard são os chunks e shards que a seção 18.6 exige em report.json; eles constam aqui porque RunReport é o modelo desse artefato.
 
 membership possui, nesta ordem, as colunas object_id, label e cluster. cluster é int64; as demais são strings. A ordem das linhas é a ordem original dos objetos.
 

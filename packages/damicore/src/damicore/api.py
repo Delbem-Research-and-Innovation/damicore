@@ -84,6 +84,18 @@ SCHEMA_VERSION = 1
 VERSION = "0.1.0"
 logger = logging.getLogger(__name__)
 
+# Specification section 11.3 requires ResourceLimitError itself to carry the distinction
+# between CSV size and object count, because that is what tells a caller whether the run is
+# reshapable at all: a wider CSV stays feasible, more rows does not.
+_SCALE_GUIDANCE = (
+    "NCD is quadratic and Neighbor Joining cubic in the object count, so a multi-gigabyte CSV "
+    "stays feasible while the object count is moderate, which is the usual case for "
+    "split='columns'. Streaming and memory maps bound RAM but not that work, so split='rows' "
+    "over a large file creates one object per row and is rejected here rather than later. "
+    "Reshape the split, reduce the input, or raise individual ResourceLimits after reviewing "
+    "estimate(); free disk is never bypassed."
+)
+
 
 def _execution(execution: ExecutionConfig | None) -> ExecutionConfig:
     try:
@@ -483,8 +495,16 @@ def run(
     )
     if not preview.within_limits:
         raise ResourceLimitError(
-            "Resource limits exceeded: " + ", ".join(preview.violations),
+            f"Resource limits exceeded: {', '.join(preview.violations)}. {_SCALE_GUIDANCE}",
             estimate=preview,
+        )
+    # The upper bound of section 9.1 is part of the argument contract, but it is expressed in
+    # leaves, so preflight is the earliest point that can decide it. Checking here keeps a
+    # rejected argument from paying for normalization, the NCD matrix and the tree first.
+    if num_clusters is not None and num_clusters > preview.object_count:
+        raise ConfigurationError(
+            f"num_clusters must be between 1 and the {preview.object_count} objects this CSV "
+            f"produces with split={checked_split!r}; got {num_clusters}"
         )
     config = _config_payload(
         split=split,

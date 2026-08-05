@@ -116,7 +116,12 @@ def main(argv: list[str] | None = None) -> int:
                 output_dir=output_dir,
                 progress=not arguments.no_progress,
             )
-            print(str(result.artifacts.run_dir), file=sys.stderr)
+            # Iterating the model rather than a hand-written list means an artifact added to
+            # ArtifactPaths is printed without editing the CLI, and one that is absent for
+            # this configuration stays absent instead of being printed as None.
+            for name, path in result.artifacts:
+                if path is not None:
+                    print(f"{name}: {path}", file=sys.stderr)
             result.close()
         return 0
     except KeyboardInterrupt:

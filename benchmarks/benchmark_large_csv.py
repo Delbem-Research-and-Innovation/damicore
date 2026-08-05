@@ -30,7 +30,15 @@ def main() -> None:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--rows", type=int, default=1_000)
     parser.add_argument("--target-bytes", type=int, default=2_147_483_648)
-    parser.add_argument("--skip-large", action="store_true")
+    # Specification section 24.4 defines two benchmarks with different costs: the large
+    # normalization measurement needs a multi-gigabyte working set, while the object sweep is
+    # minutes of CPU. One axis rather than two skip flags, so "neither" cannot be requested.
+    parser.add_argument(
+        "--select",
+        choices=("large", "sweep", "both"),
+        default="both",
+        help="which of the two specified benchmarks to run",
+    )
     parser.add_argument(
         "--objects",
         type=int,
@@ -42,7 +50,9 @@ def main() -> None:
         ),
     )
     arguments = parser.parse_args()
-    if sorted(arguments.objects) != sorted(OBJECT_COUNTS):
+    run_large: bool = arguments.select in ("large", "both")
+    run_sweep: bool = arguments.select in ("sweep", "both")
+    if run_sweep and sorted(arguments.objects) != sorted(OBJECT_COUNTS):
         print(
             f"note: sweeping {sorted(arguments.objects)} instead of the "
             f"specified {list(OBJECT_COUNTS)}",
@@ -50,7 +60,7 @@ def main() -> None:
         )
     arguments.directory.mkdir(parents=True, exist_ok=True)
     measurements: dict[str, object] = {}
-    if not arguments.skip_large:
+    if run_large:
         large_rows = math.ceil(arguments.target_bytes / (64 * 16))
         large_path = generate_csv(
             arguments.directory / "large-64-columns.csv",
@@ -69,7 +79,7 @@ def main() -> None:
             "input_bytes": large_preview.input_size_bytes,
             "peak_rss_bytes": peak_rss,
         }
-    for objects in sorted(arguments.objects):
+    for objects in sorted(arguments.objects) if run_sweep else ():
         csv_path = generate_csv(
             arguments.directory / f"benchmark-{objects}.csv",
             rows=arguments.rows,
