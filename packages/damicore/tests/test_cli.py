@@ -41,7 +41,17 @@ def test_cli_run_and_typed_error_codes(tmp_path: Path, capsys: pytest.CaptureFix
         )
         == 0
     )
-    assert str(output) in capsys.readouterr().err
+    # Specification section 20: success prints the artifact paths, not only the run directory.
+    reported = dict(
+        line.split(": ", 1) for line in capsys.readouterr().err.splitlines() if ": " in line
+    )
+    assert reported["run_dir"] == str(output)
+    for name in ("manifest", "report", "distance_matrix", "labels", "tree_json", "membership"):
+        assert Path(reported[name]).is_file()
+    # keep_normalized and save_diagnostics were not requested, so those directories are absent
+    # from the run and must not be reported as paths that a caller could open.
+    assert "normalization_dir" not in reported
+    assert "diagnostics_dir" not in reported
     assert main(["estimate", str(source), "--max-objects", "1", "--json"]) == 0
     capsys.readouterr()
     assert (
