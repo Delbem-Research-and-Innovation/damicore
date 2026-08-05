@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Pipeline orchestrator that sequences the damicore_* packages (normalizer, distance, tree_builder, clusterizer)."
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Ennio Politi Lopes", email = "enniolopes@users.noreply.github.com" }]
 requires-python = ">=3.11,<3.15"
 classifiers = [
