@@ -46,4 +46,7 @@ select = ["E", "F", "I", "UP"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = ["unit: fast isolated unit tests"]
-addopts = "--cov=damicore --cov-report=term-missing"
+# --cov-branch and the floor mirror the root configuration on purpose: coverage resolves
+# its config from the working directory, so a package-scoped run would otherwise report
+# line coverage with no threshold and read as a stronger result than it is.
+addopts = "--cov=damicore --cov-branch --cov-report=term-missing --cov-fail-under=90"
