@@ -431,3 +431,14 @@ def test_the_q_block_size_does_not_change_the_tree(q_block_size: int) -> None:
         np.array(matrix, dtype=np.float64, copy=True), list(labels), q_block_size=q_block_size
     )
     assert blocked.model_dump(mode="json") == reference.model_dump(mode="json")
+
+
+def test_identifiers_with_underscores_are_quoted() -> None:
+    """Newick turns an unquoted underscore into a blank on reading, and every id this package
+    emits carries one, so leaving them unquoted hands a conforming viewer `column 000001`."""
+    matrix = np.array([[0.0, 5.0, 9.0], [5.0, 0.0, 10.0], [9.0, 10.0, 0.0]], dtype=np.float64)
+    newick = to_newick(neighbor_joining(matrix, ["column_000001", "column_000002", "obj"]))
+    assert "'column_000001'" in newick
+    assert "'nj_root'" in newick
+    # A label with no character needing an escape stays bare.
+    assert "obj:" in newick and "'obj'" not in newick

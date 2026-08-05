@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from damicore_tree_builder.models import Tree
 
+# Underscore is in this set on purpose. Newick converts an unquoted underscore to a blank on
+# reading, and every id this package emits contains one (`column_000001`, `nj_root`), so an
+# unquoted label reaches a conforming viewer with its digits split off from its prefix.
+_MUST_QUOTE = " \t\n\r():;,[]'_"
+
 
 def _escape(identifier: str) -> str:
-    if identifier and all(character not in identifier for character in " \t\n\r():;,[]'"):
+    if identifier and all(character not in identifier for character in _MUST_QUOTE):
         return identifier
     return "'" + identifier.replace("'", "''") + "'"
 
