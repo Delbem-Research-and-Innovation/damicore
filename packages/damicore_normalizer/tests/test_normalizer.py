@@ -145,15 +145,22 @@ def test_cell_text_is_preserved_and_escaped_only_by_json(tmp_path: Path) -> None
 # Each row is a byte-level defect the parser must reject rather than silently repair: a row
 # whose field count disagrees with the header, and undecodable bytes in the header and in a
 # later chunk, which take different code paths.
+# The discriminator names the line and the counts, so a width row cannot silently start
+# passing through pandas' own on_bad_lines translation, which raises the same code from a
+# different site. Without it, deleting _validate_record_widths outright left these passing.
 MALFORMED_INPUTS = [
-    pytest.param(b"a,b\n1,2,3\n", id="every-row-wider-than-header"),
-    pytest.param(b"a,b\n1,2,3,4\n", id="two-fields-wider-than-header"),
-    pytest.param(b"a,b\n1,2,3\n4,5\n", id="first-row-wider-than-header"),
-    pytest.param(b"a,b\n1,2\n3,4,5\n", id="later-row-wider-than-header"),
-    pytest.param(b"a,b,c\n1,2\n", id="row-narrower-than-header"),
-    pytest.param(b"a,b,c\n1,2,3\n4,5\n", id="later-row-narrower-than-header"),
-    pytest.param(b"a,\xffb\n1,2\n", id="undecodable-header"),
-    pytest.param(b"a,b\n1,2\n\xff,4\n", id="undecodable-data-row"),
+    pytest.param(b"a,b\n1,2,3\n", "line 2 has 3 fields", id="every-row-wider-than-header"),
+    pytest.param(b"a,b\n1,2,3,4\n", "line 2 has 4 fields", id="two-fields-wider-than-header"),
+    pytest.param(b"a,b\n1,2,3\n4,5\n", "line 2 has 3 fields", id="first-row-wider-than-header"),
+    pytest.param(b"a,b\n1,2\n3,4,5\n", "line 3 has 3 fields", id="later-row-wider-than-header"),
+    pytest.param(b"a,b,c\n1,2\n", "line 2 has 2 fields", id="row-narrower-than-header"),
+    pytest.param(
+        b"a,b,c\n1,2,3\n4,5\n", "line 3 has 2 fields", id="later-row-narrower-than-header"
+    ),
+    pytest.param(b"a,\xffb\n1,2\n", "Could not read a valid CSV header", id="undecodable-header"),
+    pytest.param(
+        b"a,b\n1,2\n\xff,4\n", "Could not read a valid CSV header", id="undecodable-data-row"
+    ),
 ]
 
 
@@ -161,9 +168,9 @@ MALFORMED_INPUTS = [
 # differently depending on where the chunk boundary falls, so a rule checked only through
 # pandas would accept an input at one chunk size and reject it at another.
 @pytest.mark.parametrize("chunk_rows", [1, 2, 50])
-@pytest.mark.parametrize("payload", MALFORMED_INPUTS)
+@pytest.mark.parametrize(("payload", "discriminator"), MALFORMED_INPUTS)
 def test_malformed_input_is_rejected_as_a_csv_format_error(
-    tmp_path: Path, payload: bytes, chunk_rows: int
+    tmp_path: Path, payload: bytes, discriminator: str, chunk_rows: int
 ) -> None:
     """Specification section 10.1: a record whose field count disagrees with the header is
     malformed. Accepting one would silently drop or invent cell values, because pandas reads a
@@ -171,7 +178,7 @@ def test_malformed_input_is_rejected_as_a_csv_format_error(
     source = tmp_path / "malformed.csv"
     source.write_bytes(payload)
     output = tmp_path / "out"
-    with pytest.raises(NormalizerError) as raised:
+    with pytest.raises(NormalizerError, match=discriminator) as raised:
         normalize_csv(source, output, config=NormalizationConfig(chunk_rows=chunk_rows))
     assert raised.value.code == "csv_format_error"
     assert not (output / "manifest.json").exists()
@@ -397,3 +404,29 @@ def test_configuration_rejects_an_invalid_value(
 ) -> None:
     with pytest.raises(expected):
         NormalizationConfig(delimiter=delimiter, encoding=encoding)
+
+
+# The preflight in damicore calls scan_csv without an objects_dir to size a run before
+# creating anything. max_serialized_chunk_bytes and row_count are its only outputs and they
+# feed the memory estimate, so a wrong value there ships a wrong estimate silently.
+@pytest.mark.parametrize(
+    ("chunk_rows", "expected_max_chunk"),
+    [
+        pytest.param(1, 8, id="one-row-per-chunk"),
+        pytest.param(50, 16, id="every-row-in-one-chunk"),
+    ],
+)
+def test_scanning_without_an_objects_dir_measures_without_writing(
+    tmp_path: Path, chunk_rows: int, expected_max_chunk: int
+) -> None:
+    source = tmp_path / "input.csv"
+    source.write_text("a,b\n1,2\n3,4\n", encoding="utf-8")
+
+    result = csv_reader.scan_csv(source, NormalizationConfig(chunk_rows=chunk_rows))
+
+    # Two columns of two cells; every cell serializes to `"x"\n`, four bytes.
+    assert [item.object_id for item in result.objects] == ["column_000001", "column_000002"]
+    assert result.total_bytes == 16
+    assert result.row_count == 2
+    assert result.max_serialized_chunk_bytes == expected_max_chunk
+    assert list(tmp_path.iterdir()) == [source]

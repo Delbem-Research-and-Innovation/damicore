@@ -108,10 +108,12 @@ def _validate_record_widths(path: Path, config: NormalizationConfig, width: int)
     boundary falls; a short row is padded with a cell the input never contained. The canonical
     bytes would then depend on ``chunk_rows``, which section 24.1 forbids.
 
-    ``csv.reader`` agrees with pandas on record boundaries and field counts for every dialect
-    this contract allows, so one streaming pass over the raw records makes the check total. A
-    blank line is the single exception: ``skip_blank_lines=False`` defines it as a full-width
-    empty row, and pandas materializes it as one.
+    ``csv.reader`` agrees with pandas on record boundaries and field counts once the two are
+    configured to match, so one streaming pass over the raw records makes the check total.
+    Two axes had to be aligned deliberately and are handled above: the BOM, which pandas
+    strips and this codec does not, and the field-size cap, which pandas does not impose. A
+    blank line is a third: ``skip_blank_lines=False`` defines it as a full-width empty row,
+    and pandas materializes it as one.
     """
     try:
         with (
