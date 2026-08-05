@@ -5,10 +5,16 @@ from typing import Literal
 
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 import damicore_normalizer.api as api
 import damicore_normalizer.csv_reader as csv_reader
-from damicore_normalizer import NormalizationConfig, NormalizerError, normalize_csv
+from damicore_normalizer import (
+    NormalizationConfig,
+    NormalizerError,
+    ObjectDescriptor,
+    normalize_csv,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -321,6 +327,31 @@ def test_output_must_be_empty_and_user_files_survive(tmp_path: Path) -> None:
         normalize_csv(source, output)
     assert raised.value.code == "output_conflict_error"
     assert (output / "user.txt").read_text(encoding="utf-8") == "preserve"
+
+
+# Each row is one way a relative_path can escape the run directory. The manifest is read back
+# through this model by the orchestrator (damicore/api.py deserializes manifest.json), so this
+# validator is the gate a tampered or corrupted manifest has to pass.
+UNCONTAINED_PATHS = [
+    pytest.param("../evil.jsonl", id="parent-traversal"),
+    pytest.param("objects/../../evil.jsonl", id="nested-traversal"),
+    pytest.param("/etc/passwd", id="absolute-path"),
+    pytest.param("objects//evil.jsonl", id="non-canonical-posix-form"),
+]
+
+
+@pytest.mark.parametrize("relative_path", UNCONTAINED_PATHS)
+def test_an_uncontained_relative_path_is_rejected(relative_path: str) -> None:
+    """Specification path-containment invariant: a manifest entry may only name a contained
+    POSIX path, so a descriptor deserialized from disk can never point outside the run."""
+    with pytest.raises(ValidationError, match="contained POSIX path"):
+        ObjectDescriptor(
+            object_id="column_000001",
+            label="a",
+            relative_path=relative_path,
+            size_bytes=0,
+            sha256="0" * 64,
+        )
 
 
 @pytest.mark.parametrize(
