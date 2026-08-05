@@ -84,6 +84,38 @@ def test_more_requested_clusters_than_leaves_is_rejected(tmp_path: Path) -> None
 # JSON payloads are dynamic by nature, hence the Any in the mutation signature.
 TreeMutation = Callable[[dict[str, Any]], object]
 
+
+def _leave_one_leaf(value: dict[str, Any]) -> None:
+    """Demote every leaf but the first, so the graph carries fewer than two objects."""
+    for node in value["nodes"][1:4]:
+        node.update(kind="internal")
+
+
+def _add_redundant_edge(value: dict[str, Any]) -> None:
+    """An extra edge breaks the n-1 count that makes the graph a tree."""
+    value["edges"].append({"source": "i1", "target": "c", "length": 1.0})
+
+
+def _strand_one_leaf(value: dict[str, Any]) -> None:
+    """Point i2's second edge back at c, leaving d isolated while the edge count still
+    equals n-1 -- the one shape that reaches the connectivity check rather than the count."""
+    value["edges"][3].update(target="c")
+
+
+def _overflow_root_merge(value: dict[str, Any]) -> None:
+    """The root's two branches are summed into one edge, and that sum can leave float range
+    even though each operand is finite, so the schema's allow_inf_nan=False cannot catch it."""
+    value["edges"][4].update(length=1e308)
+    value["edges"][5].update(length=1e308)
+
+
+def _overflow_shift(value: dict[str, Any]) -> None:
+    """A hugely negative branch forces a shift so large that adding it to the largest branch
+    overflows, which the post-shift finiteness check exists to catch."""
+    value["edges"][0].update(length=-1e308)
+    value["edges"][1].update(length=1e308)
+
+
 TREE_CONTRACT_MUTATIONS: list[tuple[str, TreeMutation]] = [
     ("wrong-schema-version", lambda value: value.update(schema_version=2)),
     ("unknown-root", lambda value: value.update(root_id="missing")),
@@ -96,6 +128,13 @@ TREE_CONTRACT_MUTATIONS: list[tuple[str, TreeMutation]] = [
     ("non-finite-length", lambda value: value["edges"][0].update(length=float("nan"))),
     ("dangling-edge", lambda value: value["edges"][0].update(target="missing")),
     ("extra-field", lambda value: value.update(unexpected=True)),
+    # Structural clauses the schema alone cannot express: they hold over the assembled graph,
+    # after the root's two edges are merged into the single unrooted edge.
+    ("fewer-than-two-leaves", _leave_one_leaf),
+    ("edge-count-not-n-minus-one", _add_redundant_edge),
+    ("disconnected-graph", _strand_one_leaf),
+    ("root-merge-overflows-to-infinity", _overflow_root_merge),
+    ("shift-overflows-adjusted-length", _overflow_shift),
 ]
 
 
