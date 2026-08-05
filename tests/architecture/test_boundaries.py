@@ -11,6 +11,7 @@ import damicore_normalizer
 import damicore_tree_builder
 import pytest
 import tomllib
+from damicore.api import VERSION
 
 pytestmark = pytest.mark.contract
 
@@ -220,10 +221,17 @@ def test_third_party_runtime_dependencies_are_exact() -> None:
 
 
 def test_public_packages_declare_one_lockstep_version() -> None:
-    """Specification section 26: the five published distributions share one version."""
+    """Specification section 26: the five published distributions share one version.
+
+    The version is restated a sixth time in code: `damicore.api.VERSION` is the value `run()`
+    stamps into every manifest as `damicore_version`, which section 18.5 makes mandatory run
+    provenance. Asserting it here rather than in a test of its own keeps one check total over
+    every statement of the released version, so a release bump cannot leave one behind.
+    """
     versions = {package: _version(package) for package in sorted(PUBLIC)}
     assert len(set(versions.values())) == 1, versions
     assert re.fullmatch(r"\d+\.\d+\.\d+", versions["damicore"]), versions["damicore"]
+    assert VERSION == versions["damicore"], (VERSION, versions["damicore"])
 
 
 def test_orchestrator_pins_every_stage_within_the_lockstep_minor() -> None:
