@@ -119,3 +119,25 @@ def test_a_failed_manifest_write_leaves_no_temporary_file(
         atomic_json(target, {"a": 1})
     assert not target.exists()
     assert list(tmp_path.iterdir()) == []
+
+
+def test_estimate_detects_a_csv_changed_during_the_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Preflight re-stats the input after scanning too: the scan itself is the long step, so
+    a file replaced during it would otherwise be described by an estimate of the old bytes."""
+    estimate_module = import_module("damicore.estimate")
+
+    source = tmp_path / "input.csv"
+    source.write_text("a,b\n1,2\n2,3\n", encoding="utf-8")
+    real_scan = estimate_module.scan_csv
+
+    def mutating_scan(*args: object, **kwargs: object) -> object:
+        result = real_scan(*args, **kwargs)  # pyright: ignore[reportCallIssue]
+        source.write_text("a,b\n1,2\n2,3\n9,9\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(estimate_module, "scan_csv", mutating_scan)
+    with pytest.raises(InputValidationError, match="changed during preflight") as raised:
+        estimate(source)
+    assert raised.value.code == "input_drift"
