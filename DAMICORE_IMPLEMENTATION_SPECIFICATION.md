@@ -925,14 +925,21 @@ L(j,u) = d(i,j) - L(i,u)
 d(u,k) = 0.5 * (d(i,k) + d(j,k) - d(i,j))
 ~~~
 
-Enquanto r > 2, selecionar o menor Q fora da diagonal. A varredura de blocos segue a ordem dos IDs ativos; usa comparação < e, somente para igualdade float64 exata, o menor par lexicográfico de IDs. Não existe tolerância de empate. Ao final, criar um root com os dois clusters restantes e comprimentos iguais a metade da distância entre eles.
+Enquanto r > 2, selecionar o menor Q fora da diagonal. A varredura de blocos segue a ordem dos IDs ativos.
 
-Após unir i e j em u, o slot de i passa a representar u e o slot de j fica inativo. Para cada k ainda ativo:
+Dois valores de Q cujo módulo da diferença não excede `1e-9 * max(1, |Q_min|)` constituem um empate, e o empate é resolvido pelo menor par lexicográfico de IDs ativos. A tolerância é relativa e normativa: comparação por igualdade float64 exata NÃO é aceitável aqui. Cada d(i,j) é razão entre tamanhos comprimidos inteiros, de modo que a precisão significativa do dado se esgota muito antes do 16º dígito; além disso, os empates que a regra existe para resolver são exatamente os que o arredondamento destrói. Com r = 4, por exemplo, Q(i,j) e Q(k,l) de pares complementares são algebricamente iguais para qualquer matriz, e ainda assim float64 só detecta essa igualdade em cerca de 60% dos casos — nenhuma estratégia de somatório corrige isso, porque o cancelamento ocorre na subtração final e não nas somas.
+
+Ao final, criar um root com os dois clusters restantes e comprimentos iguais a metade da distância entre eles.
+
+Após unir i e j em u, o slot de i passa a representar u e o slot de j fica inativo.
+
+As somas R são recalculadas a partir da matriz no início de cada iteração:
 
 ~~~text
-R'_k = R_k - d(k,i) - d(k,j) + d(k,u)
-R'_u = soma de d(u,k) para todos os k ativos diferentes de u
+R_i = soma de d(i,k) para todos os k ativos diferentes de i
 ~~~
+
+A forma incremental `R'_k = R_k - d(k,i) - d(k,j) + d(k,u)` NÃO deve ser usada: ela acumula erro a cada união, e o custo do recálculo é O(r²), já pago pela varredura de Q, portanto não altera a complexidade.
 
 A diagonal do slot reutilizado volta a zero. A lista de ativos é mantida ordenada por ID estável para a resolução de empates.
 

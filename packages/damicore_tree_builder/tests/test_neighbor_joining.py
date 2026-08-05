@@ -1,5 +1,6 @@
 import json
 from collections.abc import Callable
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -345,3 +346,39 @@ def test_an_exact_q_tie_is_broken_by_the_smallest_id_pair(order: list[str]) -> N
     tree = neighbor_joining(matrix, order)
     joined = {edge.target for edge in tree.edges if edge.source == "nj_000001"}
     assert joined == {"a", "b"}
+
+
+# With four clusters left, Q(i,j) and Q(k,l) for complementary pairs are algebraically equal
+# for every matrix: R_i+R_l and R_j+R_k expand to the same sum, so the two Q values cancel to
+# each other. float64 loses that equality on roughly 40% of inputs, which is why section 15.2
+# compares within a relative band. Fractions reproduce the rule exactly, so they are the
+# authority the implementation is checked against.
+# Seeds 11, 16 and 22 are the cases where a later pair scores marginally BELOW the running
+# best while staying inside the band -- the branch that keeps the earlier pair and only
+# recentres the band, which is the whole reason the band exists.
+@pytest.mark.parametrize("seed", [0, 1, 2, 3, 4, 5, 6, 7, 11, 16, 22])
+def test_the_first_join_follows_the_rule_a_float_comparison_would_lose(seed: int) -> None:
+    generator = np.random.default_rng(seed)
+    values = generator.random((4, 4)) * 10
+    matrix = (values + values.T) / 2
+    np.fill_diagonal(matrix, 0.0)  # pyright: ignore[reportUnknownMemberType]
+    labels = ["obj_000", "obj_001", "obj_002", "obj_003"]
+
+    distances = {
+        (left, right): Fraction(float(matrix[i][j]))
+        for i, left in enumerate(labels)
+        for j, right in enumerate(labels)
+    }
+    sums = {
+        node: sum(distances[(node, other)] for other in labels if other != node) for node in labels
+    }
+    scored = sorted(
+        (2 * distances[(left, right)] - sums[left] - sums[right], left, right)
+        for index, left in enumerate(labels)
+        for right in labels[index + 1 :]
+    )
+    _, expected_left, expected_right = scored[0]
+
+    tree = neighbor_joining(matrix, labels)
+    joined = {edge.target for edge in tree.edges if edge.source == "nj_000001"}
+    assert joined == {expected_left, expected_right}
