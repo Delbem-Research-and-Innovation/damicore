@@ -1,7 +1,8 @@
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -520,3 +521,52 @@ def test_the_matrix_view_close_is_idempotent(tmp_path: Path) -> None:
     view.close()
     with pytest.raises(ValueError, match="closed"):
         _ = view.shape
+
+
+def test_shards_are_submitted_in_a_bounded_window() -> None:
+    """The streaming invariant: work in flight is bounded by the pool, not by the pair count.
+
+    Executor.map submits every shard before yielding anything, and each shard's arguments
+    carry a copy of the object paths and sizes, so the queued payload would grow with the
+    number of pairs. This asserts the window instead: nothing beyond `limit` is submitted
+    until a result has been taken, and results still arrive in submission order.
+    """
+    submitted: list[int] = []
+
+    class RecordingExecutor:
+        def submit(
+            self, function: object, argument: distance_api.WorkerArguments
+        ) -> Future[distance_api.WorkerResult]:
+            submitted.append(argument[0])
+            future: Future[distance_api.WorkerResult] = Future()
+            future.set_result((argument[0], [], [], []))
+            return future
+
+    total = 10
+    limit = 3
+    no_pairs: list[tuple[int, int]] = []
+    no_paths: list[str] = []
+    no_sizes: list[int] = []
+    shards: list[distance_api.WorkerArguments] = [
+        (index, no_pairs, no_paths, no_sizes, "zlib", 6, 1024) for index in range(total)
+    ]
+    arguments: Iterator[distance_api.WorkerArguments] = iter(shards)
+    results = distance_api._bounded_submit(
+        cast(ProcessPoolExecutor, RecordingExecutor()), arguments, limit
+    )
+
+    # Nothing is submitted until the first result is pulled, and then only enough to fill
+    # the window.
+    assert submitted == []
+    first = next(results)
+    assert first[0] == 0
+    assert len(submitted) == limit
+
+    consumed = [first[0]]
+    for shard_index, *_ in results:
+        # Each further result releases at most one more submission.
+        assert len(submitted) - len(consumed) <= limit
+        consumed.append(shard_index)
+
+    assert consumed == list(range(total))
+    assert submitted == list(range(total))

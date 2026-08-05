@@ -11,7 +11,9 @@ import struct
 import tempfile
 import time
 import zlib
-from concurrent.futures import ProcessPoolExecutor
+from collections import deque
+from collections.abc import Iterator
+from concurrent.futures import Future, ProcessPoolExecutor
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
@@ -114,9 +116,12 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
     return object_ids, labels, paths
 
 
-def _worker(
-    arguments: tuple[int, list[tuple[int, int]], list[str], list[int], str, int, int],
-) -> tuple[int, list[int], list[int], list[float]]:
+# One shard's work: its index, its pairs, and the run-wide inputs a worker process needs.
+WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], str, int, int]
+WorkerResult = tuple[int, list[int], list[int], list[float]]
+
+
+def _worker(arguments: WorkerArguments) -> WorkerResult:
     shard_index, pairs, raw_paths, sizes, compressor, level, chunk_bytes = arguments
     paths = [Path(path) for path in raw_paths]
     left: list[int] = []
@@ -133,6 +138,28 @@ def _worker(
         right.append(j)
         values.append(normalized_compression_distance(sizes[i], sizes[j], cxy))
     return shard_index, left, right, values
+
+
+def _bounded_submit(
+    executor: ProcessPoolExecutor,
+    arguments: Iterator[WorkerArguments],
+    limit: int,
+) -> Iterator[WorkerResult]:
+    """Yield worker results in submission order, keeping at most `limit` shards in flight.
+
+    ``Executor.map`` cannot be used here: it materialises its whole argument iterable before
+    yielding anything, and every shard's tuple carries a full copy of the object paths and
+    the compressed sizes. The pending payload would then grow with the pair count rather
+    than staying bounded by the worker count, which is the streaming invariant section 14
+    requires.
+    """
+    pending: deque[Future[WorkerResult]] = deque()
+    for argument in arguments:
+        pending.append(executor.submit(_worker, argument))
+        if len(pending) >= limit:
+            yield pending.popleft().result()
+    while pending:
+        yield pending.popleft().result()
 
 
 def _validate_matrix(matrix: npt.NDArray[np.float64], block_size: int = 512) -> None:
@@ -417,7 +444,9 @@ def compute_distance_matrix(
             max_workers=settings.effective_workers,
             mp_context=get_context("spawn"),
         )
-        results = executor.map(_worker, arguments)
+        # Two shards per worker: enough that a worker never idles waiting for the next
+        # submission, small enough that the queued payload stays proportional to the pool.
+        results = _bounded_submit(executor, arguments, settings.effective_workers * 2)
     try:
         for shard_index, left, right, values in results:
             if len(left) != len(values) or not all(math.isfinite(value) for value in values):
