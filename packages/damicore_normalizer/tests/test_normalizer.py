@@ -100,6 +100,15 @@ def test_input_contract_violation_reports_its_code_and_cause(
     assert raised.value.code == code
 
 
+def test_scan_csv_rejects_a_missing_path_on_its_own(tmp_path: Path) -> None:
+    """scan_csv reads from the filesystem, so it is a file boundary in its own right (AGENTS.md:
+    validate at file boundaries) and must reject a missing path even when called directly,
+    not only through normalize_csv's own pre-check."""
+    with pytest.raises(NormalizerError) as raised:
+        csv_reader.scan_csv(tmp_path / "missing.csv", NormalizationConfig())
+    assert raised.value.code == "input_validation_error"
+
+
 def test_a_declared_delimiter_and_encoding_are_used_verbatim(tmp_path: Path) -> None:
     """Specification sections 10.1 and 10.3: the declared delimiter and encoding decode the
     input, and the canonical object bytes are always UTF-8 JSON regardless of that encoding."""
