@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
+import pandas as pd
 import pytest
 
 import damicore_normalizer.api as api
@@ -160,6 +161,53 @@ def test_malformed_input_is_rejected_as_a_csv_format_error(
     assert raised.value.code == "csv_format_error"
     assert not (output / "manifest.json").exists()
     assert not (output / "objects").exists()
+
+
+def test_a_field_beyond_the_csv_size_limit_is_rejected(tmp_path: Path) -> None:
+    """csv.Error (here, a field past csv.field_size_limit()) can surface only once a data
+    row is reached: _read_header's single next() call returns before its field grows that
+    large, so this is the one case that reaches _validate_record_widths's own try/except."""
+    source = tmp_path / "oversized_field.csv"
+    source.write_text("a,b\n1," + "x" * 200_000 + "\n", encoding="utf-8")
+    with pytest.raises(NormalizerError) as raised:
+        normalize_csv(source, tmp_path / "out")
+    assert raised.value.code == "csv_format_error"
+
+
+def test_a_header_change_mid_parse_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guards an invariant pandas' chunked reader is not expected to break on its own: every
+    chunk must report the same columns as the header _read_header already validated."""
+    source = _csv(tmp_path)
+    chunks = [
+        pd.DataFrame({"name": ["Ana"], "note": ["a,b"]}),
+        pd.DataFrame({"name": ["Bia"], "unexpected": [""]}),
+    ]
+
+    def fake_read_csv(*args: object, **kwargs: object) -> list[pd.DataFrame]:
+        return chunks
+
+    monkeypatch.setattr(csv_reader.pd, "read_csv", fake_read_csv)
+    with pytest.raises(NormalizerError, match="header changed") as raised:
+        normalize_csv(source, tmp_path / "out")
+    assert raised.value.code == "csv_format_error"
+
+
+def test_a_pandas_parser_error_is_translated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pandas can reject a CSV that csv.reader's own width check tolerated; the translation
+    at the bottom of scan_csv is the last line of defense before an unhandled traceback."""
+    source = _csv(tmp_path)
+
+    def failing_read_csv(*args: object, **kwargs: object) -> list[pd.DataFrame]:
+        raise pd.errors.ParserError("boom")
+
+    monkeypatch.setattr(csv_reader.pd, "read_csv", failing_read_csv)
+    with pytest.raises(NormalizerError) as raised:
+        normalize_csv(source, tmp_path / "out")
+    assert raised.value.code == "csv_format_error"
 
 
 def test_a_blank_line_is_a_full_width_empty_row(tmp_path: Path) -> None:
