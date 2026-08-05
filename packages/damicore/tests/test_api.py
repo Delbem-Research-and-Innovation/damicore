@@ -7,6 +7,7 @@ import pytest
 
 from damicore import (
     ArtifactValidationError,
+    ConfigurationError,
     DamicoreError,
     ExecutionConfig,
     MaterializationError,
@@ -299,3 +300,62 @@ def test_an_unexpected_failure_names_its_cause_in_the_report(
     report = json.loads((output / "report.json").read_text(encoding="utf-8"))
     assert report["status"] == "failed"
     assert "MemoryError" in str(report["error"])
+
+
+# Each row is one configuration value the public API must refuse rather than coerce.
+@pytest.mark.parametrize(
+    ("kwargs", "discriminator"),
+    [
+        pytest.param({"compressor": "bz2"}, "zlib' or 'gzip", id="unknown-compressor"),
+        pytest.param({"num_clusters": 0}, "num_clusters", id="cluster-count-below-one"),
+        pytest.param({"split": "diagonal"}, "split", id="unknown-split"),
+    ],
+)
+def test_an_invalid_option_is_refused_before_any_work(
+    tmp_path: Path, kwargs: dict[str, object], discriminator: str
+) -> None:
+    output = tmp_path / "run"
+    with pytest.raises(ConfigurationError, match=discriminator):
+        run(_csv(tmp_path), output_dir=output, progress=False, **kwargs)  # pyright: ignore[reportArgumentType]
+    assert not (output / "manifest.json").exists()
+
+
+def test_an_interrupted_run_is_recorded_as_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A KeyboardInterrupt must still leave a report saying what happened, and must never
+    leave the run looking completed."""
+    import damicore.api as damicore_api
+
+    def interrupted_build_tree(*args: object, **kwargs: object) -> object:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(damicore_api, "build_tree", interrupted_build_tree)
+    output = tmp_path / "run"
+    with pytest.raises(KeyboardInterrupt):
+        run(
+            _csv(tmp_path),
+            output_dir=output,
+            progress=False,
+            execution=ExecutionConfig(workers=1),
+        )
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == "interrupted"
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] != "completed"
+
+
+def test_a_platform_without_rusage_reports_no_peak_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """peak_rss_bytes is optional by contract, so a platform that refuses the measurement
+    must produce null rather than failing the run."""
+    import resource
+
+    import damicore.api as damicore_api
+
+    def refusing_getrusage(who: int) -> object:
+        raise OSError("rusage unavailable")
+
+    monkeypatch.setattr(resource, "getrusage", refusing_getrusage)
+    assert damicore_api._peak_rss() is None
