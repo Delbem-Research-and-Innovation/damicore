@@ -222,3 +222,6 @@ models/**/paper/*.run.xml
 models/**/paper/*.synctex.gz
 models/**/paper/*.toc
 models/**/paper/*.pdf
+
+# Guardian audit loop logs (generated output, never a source file)
+guardian-loop.txt

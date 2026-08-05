@@ -90,3 +90,16 @@ def test_cli_interrupt_exit_code(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
     monkeypatch.setattr("damicore.cli.run", interrupted)
     assert main(["run", str(_csv(tmp_path)), "--no-progress"]) == 130
+
+
+def test_estimate_without_json_keeps_stdout_empty(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without --json the preview goes to stderr, so a caller piping stdout gets nothing to
+    misparse. The JSON form is covered separately."""
+    source = tmp_path / "input.csv"
+    source.write_text("a,b\naaaa,bbbb\ncccc,dddd\n", encoding="utf-8")
+    assert main(["estimate", str(source)]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err)["object_count"] == 2

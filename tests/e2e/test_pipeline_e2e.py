@@ -41,6 +41,19 @@ def test_pipeline_produces_complete_result_for_split(
         assert result.tree_newick.endswith(";")
         assert result.clusters
         assert sorted(result.clusters) == list(range(len(result.clusters)))
+
+        # The fixture is built with two groups, so recovering them is what makes this an
+        # end-to-end test of DAMICORE rather than of its plumbing. The assertion is purity,
+        # not an exact count: the automatic modularity cut may split a true group into
+        # several communities, which loses no information, but it must never merge objects
+        # from different groups. Object ids are positional and one-based.
+        def group_of(object_id: str) -> int:
+            return (int(object_id.split("_")[1]) - 1) % 2
+
+        recovered = {
+            frozenset(map(group_of, members)) for members in result.clusters.values()
+        }
+        assert recovered == {frozenset({0}), frozenset({1})}
     finally:
         result.close()
 

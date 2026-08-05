@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import os
 import tempfile
@@ -25,17 +26,18 @@ class _ClustersArtifact(BaseModel):
     clusters: tuple[_ClusterItem, ...]
 
 
-def _atomic_text(path: Path, payload: str) -> None:
+def _stage(path: Path, payload: str, newline: str) -> str:
+    """Write `payload` beside `path` and return the temporary name, unrenamed."""
     descriptor, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline=newline) as stream:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary_name, path)
-    finally:
-        if os.path.exists(temporary_name):
-            os.unlink(temporary_name)
+    except BaseException:
+        os.unlink(temporary_name)
+        raise
+    return temporary_name
 
 
 def write_cluster_artifacts(
@@ -45,22 +47,22 @@ def write_cluster_artifacts(
     cluster_for: dict[str, int],
     ordered_groups: list[tuple[str, ...]],
 ) -> tuple[Path, Path]:
-    membership_path = destination / "membership.csv"
-    descriptor, temporary_name = tempfile.mkstemp(dir=destination, prefix=".membership.")
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
-            writer = csv.writer(stream, lineterminator="\n")
-            writer.writerow(["object_id", "label", "cluster"])
-            for object_id in object_ids:
-                writer.writerow([object_id, labels[object_id], cluster_for[object_id]])
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_name, membership_path)
-    finally:
-        if os.path.exists(temporary_name):
-            os.unlink(temporary_name)
+    """Publish both cluster artifacts, or neither.
 
+    The two files describe one clustering, and the run that follows refuses a directory that
+    already holds either of them. Renaming the first into place before the second exists
+    would therefore let one failed write strand a membership.csv that no later run can clear
+    on its own, so both are staged first and renamed only once both exist.
+    """
+    membership_path = destination / "membership.csv"
     clusters_path = destination / "clusters.json"
+
+    rows = io.StringIO()
+    writer = csv.writer(rows, lineterminator="\n")
+    writer.writerow(["object_id", "label", "cluster"])
+    for object_id in object_ids:
+        writer.writerow([object_id, labels[object_id], cluster_for[object_id]])
+
     payload = _ClustersArtifact(
         schema_version=1,
         clusters=tuple(
@@ -72,9 +74,29 @@ def write_cluster_artifacts(
             for cluster, group in enumerate(ordered_groups)
         ),
     )
-    _atomic_text(
-        clusters_path,
+    clusters_text = (
         json.dumps(payload.model_dump(mode="json"), indent=2, sort_keys=True, allow_nan=False)
-        + "\n",
+        + "\n"
     )
+
+    membership_temp = _stage(membership_path, rows.getvalue(), newline="")
+    try:
+        clusters_temp = _stage(clusters_path, clusters_text, newline="\n")
+    except BaseException:
+        os.unlink(membership_temp)
+        raise
+
+    try:
+        os.replace(membership_temp, membership_path)
+    except BaseException:
+        os.unlink(membership_temp)
+        os.unlink(clusters_temp)
+        raise
+    try:
+        os.replace(clusters_temp, clusters_path)
+    except BaseException:
+        # membership.csv is already published; withdraw it so the directory is left as found.
+        os.unlink(clusters_temp)
+        membership_path.unlink(missing_ok=True)
+        raise
     return membership_path, clusters_path

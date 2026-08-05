@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Neighbor-Joining tree builder for the DAMICORE pipeline."
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Ennio Politi Lopes", email = "enniolopes@users.noreply.github.com" }]
 requires-python = ">=3.11,<3.15"
 classifiers = [
@@ -34,4 +35,7 @@ select = ["E", "F", "I", "UP"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = ["unit: fast isolated unit tests"]
-addopts = "--cov=damicore_tree_builder --cov-report=term-missing"
+# --cov-branch and the floor mirror the root configuration on purpose: coverage resolves
+# its config from the working directory, so a package-scoped run would otherwise report
+# line coverage with no threshold and read as a stronger result than it is.
+addopts = "--cov=damicore_tree_builder --cov-branch --cov-report=term-missing --cov-fail-under=90"

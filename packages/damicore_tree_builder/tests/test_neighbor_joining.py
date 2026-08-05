@@ -1,11 +1,16 @@
 import json
+from collections.abc import Callable
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
 import pytest
 
+import damicore_tree_builder.api as api
+import damicore_tree_builder.artifacts as artifacts
 from damicore_tree_builder import Tree, TreeBuilderError, build_tree, neighbor_joining
+from damicore_tree_builder.neighbor_joining import build_neighbor_joining
 from damicore_tree_builder.newick import to_newick
 
 pytestmark = pytest.mark.unit
@@ -143,18 +148,46 @@ def _matrix(rows: list[list[float]]) -> npt.NDArray[np.float64]:
     return np.array(rows, dtype=np.float64)
 
 
+# Every guard here raises the same code, so the message is the only thing that says WHICH
+# property broke. Without it the rows are interchangeable: delete the finiteness check and
+# the nan row still passes, because np.array_equal reports NaN as unequal and the symmetry
+# guard fires in its place.
 @pytest.mark.parametrize(
-    ("matrix", "labels"),
+    ("matrix", "labels", "discriminator"),
     [
-        pytest.param(_matrix([[0.0, float("nan")], [float("nan"), 0.0]]), ["a", "b"], id="nan"),
-        pytest.param(_matrix([[0.0, 1.0], [2.0, 0.0]]), ["a", "b"], id="asymmetric"),
-        pytest.param(_matrix([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]), ["a", "b"], id="not-square"),
-        pytest.param(_matrix([[0.0, 1.0], [1.0, 0.0]]), ["a", "a"], id="duplicate-labels"),
-        pytest.param(_matrix([[1.0, 1.0], [1.0, 0.0]]), ["a", "b"], id="non-zero-diagonal"),
+        pytest.param(
+            _matrix([[0.0, float("nan")], [float("nan"), 0.0]]),
+            ["a", "b"],
+            "must be finite",
+            id="nan",
+        ),
+        pytest.param(
+            _matrix([[0.0, 1.0], [2.0, 0.0]]), ["a", "b"], "bitwise symmetric", id="asymmetric"
+        ),
+        pytest.param(
+            _matrix([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+            ["a", "b"],
+            "shape does not match labels",
+            id="not-square",
+        ),
+        pytest.param(
+            _matrix([[0.0, 1.0], [1.0, 0.0]]),
+            ["a", "a"],
+            "two unique labels",
+            id="duplicate-labels",
+        ),
+        pytest.param(
+            _matrix([[1.0, 1.0], [1.0, 0.0]]),
+            ["a", "b"],
+            "diagonal must be exactly zero",
+            id="non-zero-diagonal",
+        ),
     ],
 )
-def test_invalid_matrix_is_rejected(matrix: npt.NDArray[np.float64], labels: list[str]) -> None:
-    with pytest.raises(TreeBuilderError):
+def test_invalid_matrix_is_rejected(
+    matrix: npt.NDArray[np.float64], labels: list[str], discriminator: str
+) -> None:
+    with pytest.raises(TreeBuilderError, match=discriminator):
         neighbor_joining(matrix, labels)
 
 
@@ -191,3 +224,221 @@ def test_labels_schema_rejects_coercion_and_extra_fields(tmp_path: Path) -> None
     )
     with pytest.raises(TreeBuilderError, match="labels"):
         build_tree(tmp_path / "distance.npy", labels, tmp_path / "tree-output")
+
+
+def _artifacts(
+    tmp_path: Path, ids: list[str], labels: list[str] | None = None
+) -> tuple[Path, Path]:
+    """Write the matrix and labels artifacts build_tree reads, sized to `ids`."""
+    size = len(ids)
+    matrix = np.full((size, size), 2.0, dtype=np.float64)
+    np.fill_diagonal(matrix, 0.0)  # pyright: ignore[reportUnknownMemberType]
+    matrix_path = tmp_path / "distance.npy"
+    np.save(matrix_path, matrix, allow_pickle=False)  # pyright: ignore[reportUnknownMemberType]
+    labels_path = tmp_path / "labels.json"
+    labels_path.write_text(
+        json.dumps({"schema_version": 1, "object_ids": ids, "labels": labels or ids}),
+        encoding="utf-8",
+    )
+    return matrix_path, labels_path
+
+
+# object_ids and labels index the same objects positionally, so any of these breaks that pairing.
+INCONSISTENT_LABEL_ARTIFACTS = [
+    pytest.param(["a", "b"], ["only-one"], id="length-mismatch"),
+    pytest.param(["a", "a"], ["A", "B"], id="duplicate-object-ids"),
+    pytest.param(["a", "b"], ["same", "same"], id="duplicate-labels"),
+]
+
+
+@pytest.mark.parametrize(("ids", "labels"), INCONSISTENT_LABEL_ARTIFACTS)
+def test_an_inconsistent_labels_artifact_is_rejected(
+    tmp_path: Path, ids: list[str], labels: list[str]
+) -> None:
+    """Schema validation accepts any two string tuples; their pairing is a separate contract."""
+    matrix_path, labels_path = _artifacts(tmp_path, ids, labels)
+    with pytest.raises(TreeBuilderError, match="equal length and unique") as raised:
+        build_tree(matrix_path, labels_path, tmp_path / "out")
+    assert raised.value.code == "artifact_validation_error"
+
+
+def test_an_unreadable_matrix_artifact_is_reported_as_a_typed_error(tmp_path: Path) -> None:
+    """np.load raises OSError or ValueError on a file that is not a valid .npy; the caller
+    must receive this package's typed error instead."""
+    _, labels_path = _artifacts(tmp_path, ["a", "b"])
+    corrupt = tmp_path / "corrupt.npy"
+    corrupt.write_bytes(b"not a numpy file")
+    with pytest.raises(TreeBuilderError, match="unreadable") as raised:
+        build_tree(corrupt, labels_path, tmp_path / "out")
+    assert raised.value.code == "artifact_validation_error"
+
+
+def test_a_non_float64_matrix_artifact_is_rejected(tmp_path: Path) -> None:
+    """The in-memory API converts, but a persisted matrix is memory-mapped and used as it
+    lies on disk, so its dtype is part of the artifact contract."""
+    ids = ["a", "b"]
+    matrix_path = tmp_path / "distance.npy"
+    np.save(  # pyright: ignore[reportUnknownMemberType]
+        matrix_path, np.zeros((2, 2), dtype=np.float32), allow_pickle=False
+    )
+    labels_path = tmp_path / "labels.json"
+    labels_path.write_text(
+        json.dumps({"schema_version": 1, "object_ids": ids, "labels": ids}), encoding="utf-8"
+    )
+    with pytest.raises(TreeBuilderError, match="float64") as raised:
+        build_tree(matrix_path, labels_path, tmp_path / "out")
+    assert raised.value.code == "distance_matrix_validation_error"
+
+
+# build_tree re-reads both artifacts after writing them, so each row corrupts one of them
+# between the write and that read: the check exists to catch a serializer that silently
+# dropped content, which is invisible to the in-memory tree it was built from.
+def _drop_a_leaf(tree_path: Path, newick_path: Path) -> None:
+    payload = json.loads(tree_path.read_text(encoding="utf-8"))
+    payload["nodes"] = [node for node in payload["nodes"] if node["kind"] != "leaf"]
+    tree_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _strip_the_newick_terminator(tree_path: Path, newick_path: Path) -> None:
+    newick_path.write_text(
+        newick_path.read_text(encoding="utf-8").replace(";", ""), encoding="utf-8"
+    )
+
+
+PERSISTED_ARTIFACT_CORRUPTIONS = [
+    pytest.param(_drop_a_leaf, "lost leaves", id="tree-json-missing-a-leaf"),
+    pytest.param(_strip_the_newick_terminator, "Newick", id="newick-without-terminator"),
+]
+
+
+@pytest.mark.parametrize(("corrupt", "discriminator"), PERSISTED_ARTIFACT_CORRUPTIONS)
+def test_a_corrupted_persisted_artifact_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    corrupt: Callable[[Path, Path], None],
+    discriminator: str,
+) -> None:
+    matrix_path, labels_path = _artifacts(tmp_path, ["a", "b", "c"])
+    real_write = api.write_tree_artifacts
+
+    def corrupting_write(tree: Tree, destination: Path) -> tuple[Path, Path]:
+        tree_path, newick_path = real_write(tree, destination)
+        corrupt(tree_path, newick_path)
+        return tree_path, newick_path
+
+    monkeypatch.setattr(api, "write_tree_artifacts", corrupting_write)
+    with pytest.raises(TreeBuilderError, match=discriminator) as raised:
+        build_tree(matrix_path, labels_path, tmp_path / "out")
+    assert raised.value.code == "artifact_validation_error"
+
+
+def test_a_failed_tree_write_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both artifacts go through the same atomic helper, so a failure at the rename must not
+    leave the partial file behind."""
+    matrix_path, labels_path = _artifacts(tmp_path, ["a", "b", "c"])
+    output = tmp_path / "out"
+
+    def failing_replace(src: object, dst: object) -> None:
+        raise OSError("simulated failure while committing the tree")
+
+    monkeypatch.setattr(artifacts.os, "replace", failing_replace)
+    with pytest.raises(OSError):
+        build_tree(matrix_path, labels_path, output)
+    assert not list(output.glob(".tree.*"))
+
+
+# At three remaining nodes every pair has Q = -(d_ij + d_ik + d_jk), so all three are exactly
+# equal whatever the distances are. Section 15.2 then mandates the lexicographically smallest
+# ID pair. Row sums are recomputed each round precisely so this equality survives as an exact
+# float64 tie: maintained incrementally they drift, and drift, not the rule, picks the pair.
+@pytest.mark.parametrize(
+    "order",
+    [
+        pytest.param(["a", "b", "c"], id="already-sorted"),
+        pytest.param(["c", "b", "a"], id="reversed"),
+        pytest.param(["b", "c", "a"], id="rotated"),
+    ],
+)
+def test_an_exact_q_tie_is_broken_by_the_smallest_id_pair(order: list[str]) -> None:
+    distances = {("a", "b"): 7.0, ("a", "c"): 3.0, ("b", "c"): 5.0}
+
+    def distance(left: str, right: str) -> float:
+        if left == right:
+            return 0.0
+        return distances[(left, right)] if (left, right) in distances else distances[(right, left)]
+
+    matrix = np.array(
+        [[distance(left, right) for right in order] for left in order], dtype=np.float64
+    )
+    tree = neighbor_joining(matrix, order)
+    joined = {edge.target for edge in tree.edges if edge.source == "nj_000001"}
+    assert joined == {"a", "b"}
+
+
+# With four clusters left, Q(i,j) and Q(k,l) for complementary pairs are algebraically equal
+# for every matrix: R_i+R_l and R_j+R_k expand to the same sum, so the two Q values cancel to
+# each other. float64 loses that equality on roughly 40% of inputs, which is why section 15.2
+# compares within a relative band. Fractions reproduce the rule exactly, so they are the
+# authority the implementation is checked against.
+# Seeds 11, 16 and 22 are the cases where a later pair scores marginally BELOW the running
+# best while staying inside the band -- the branch that keeps the earlier pair and only
+# recentres the band, which is the whole reason the band exists.
+@pytest.mark.parametrize("seed", [0, 1, 2, 3, 4, 5, 6, 7, 11, 16, 22])
+def test_the_first_join_follows_the_rule_a_float_comparison_would_lose(seed: int) -> None:
+    generator = np.random.default_rng(seed)
+    values = generator.random((4, 4)) * 10
+    matrix = (values + values.T) / 2
+    np.fill_diagonal(matrix, 0.0)  # pyright: ignore[reportUnknownMemberType]
+    labels = ["obj_000", "obj_001", "obj_002", "obj_003"]
+
+    distances = {
+        (left, right): Fraction(float(matrix[i][j]))
+        for i, left in enumerate(labels)
+        for j, right in enumerate(labels)
+    }
+    sums = {
+        node: sum(distances[(node, other)] for other in labels if other != node) for node in labels
+    }
+    scored = sorted(
+        (2 * distances[(left, right)] - sums[left] - sums[right], left, right)
+        for index, left in enumerate(labels)
+        for right in labels[index + 1 :]
+    )
+    _, expected_left, expected_right = scored[0]
+
+    tree = neighbor_joining(matrix, labels)
+    joined = {edge.target for edge in tree.edges if edge.source == "nj_000001"}
+    assert joined == {expected_left, expected_right}
+
+
+@pytest.mark.parametrize("q_block_size", [1, 2, 3, 512])
+def test_the_q_block_size_does_not_change_the_tree(q_block_size: int) -> None:
+    """Specification section 15.4: blocking bounds how much of the Q scan is in flight, never
+    which pair wins. Every existing test uses the default on a matrix smaller than one block,
+    so the loop never took a second iteration and a blocking bug would have been invisible."""
+    generator = np.random.default_rng(5)
+    values = generator.random((8, 8)) * 10
+    matrix = (values + values.T) / 2
+    np.fill_diagonal(matrix, 0.0)  # pyright: ignore[reportUnknownMemberType]
+    labels = [f"obj_{index:03d}" for index in range(8)]
+
+    reference = build_neighbor_joining(
+        np.array(matrix, dtype=np.float64, copy=True), list(labels), q_block_size=512
+    )
+    blocked = build_neighbor_joining(
+        np.array(matrix, dtype=np.float64, copy=True), list(labels), q_block_size=q_block_size
+    )
+    assert blocked.model_dump(mode="json") == reference.model_dump(mode="json")
+
+
+def test_identifiers_with_underscores_are_quoted() -> None:
+    """Newick turns an unquoted underscore into a blank on reading, and every id this package
+    emits carries one, so leaving them unquoted hands a conforming viewer `column 000001`."""
+    matrix = np.array([[0.0, 5.0, 9.0], [5.0, 0.0, 10.0], [9.0, 10.0, 0.0]], dtype=np.float64)
+    newick = to_newick(neighbor_joining(matrix, ["column_000001", "column_000002", "obj"]))
+    assert "'column_000001'" in newick
+    assert "'nj_root'" in newick
+    # A label with no character needing an escape stays bare.
+    assert "obj:" in newick and "'obj'" not in newick

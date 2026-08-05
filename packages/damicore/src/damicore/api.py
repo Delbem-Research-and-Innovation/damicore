@@ -810,7 +810,11 @@ def run(
         logger.error("stage_failed", extra={"run_id": run_id, "stage": current_stage})
         raise translated from exc
     except Exception as exc:
-        translated = DamicoreError(f"Pipeline failed during {current_stage}")
+        # Name the underlying failure: without it a MemoryError and an OSError produce
+        # byte-identical report.json files, and the report is all a user has after the fact.
+        translated = DamicoreError(
+            f"Pipeline failed during {current_stage}: {type(exc).__name__}: {exc}"
+        )
         _write_failure(journal, preview, current_stage, translated, interrupted=False)
         raise translated from exc
 

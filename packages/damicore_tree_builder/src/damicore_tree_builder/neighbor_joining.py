@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -8,6 +9,23 @@ import numpy.typing as npt
 
 from damicore_tree_builder.errors import TreeBuilderError
 from damicore_tree_builder.models import Tree, TreeEdge, TreeNode
+
+# Section 15.2: two Q scores closer than this, relative to the magnitude of the better one,
+# are one tie for the lexicographic rule to break.
+#
+# An exact float64 comparison asserts a precision the input never had: every distance here is
+# a ratio of integer compressed sizes, so its meaningful digits run out long before the
+# 16th. Worse, the ties the rule exists to break are precisely the ones rounding destroys --
+# with four clusters left, Q(i,j) and Q(k,l) for complementary pairs are algebraically equal
+# for *every* matrix, yet float64 detects that only about 60% of the time, and no summation
+# strategy fixes it because the cancellation happens in the final subtraction rather than in
+# the sums. A relative band restores the rule and makes the choice stable across platforms.
+_TIE_RELATIVE_TOLERANCE = 1e-9
+
+
+def _tie_band(score: float) -> float:
+    """Half-width of the tie band around `score`, scaled to its magnitude."""
+    return _TIE_RELATIVE_TOLERANCE * max(1.0, abs(score))
 
 
 def validate_matrix(
@@ -77,15 +95,23 @@ def build_neighbor_joining(
     ]
     edges: list[TreeEdge] = []
     internal_index = 1
-    row_sums = {
-        node: float(sum(work[slots[node], slots[other]] for other in active if other != node))
-        for node in active
-    }
 
     while len(active) > 2:
         active.sort()
         count = len(active)
-        best: tuple[float, str, str] | None = None
+        # Recomputed from the matrix each round rather than carried forward, so no drift
+        # accumulates across iterations. The cost is O(r^2), which the Q scan below already
+        # pays, so nothing changes asymptotically.
+        row_sums = {
+            node: float(sum(work[slots[node], slots[other]] for other in active if other != node))
+            for node in active
+        }
+        # Section 15.2: the smallest Q wins, and pairs within the tie band are resolved by the
+        # smallest pair of IDs. `active` is sorted and pairs are visited in that order, so the
+        # running pair is always the lexicographically earliest one seen so far; a later pair
+        # therefore replaces it only by winning outright, never by tying with it.
+        best_score = math.inf
+        best_pair: tuple[str, str] | None = None
         for block_start in range(0, count, q_block_size):
             block_stop = min(block_start + q_block_size, count)
             for left_index in range(block_start, block_stop):
@@ -96,12 +122,16 @@ def build_neighbor_joining(
                         - row_sums[left]
                         - row_sums[right]
                     )
-                    candidate = (score, left, right)
-                    if best is None or candidate < best:
-                        best = candidate
-        if best is None:
-            raise TreeBuilderError("Neighbor Joining could not select a pair")
-        _, left, right = best
+                    if best_pair is None or score < best_score - _tie_band(best_score):
+                        best_pair = (left, right)
+                        best_score = score
+                    elif score < best_score:
+                        # Inside the band: keep the earlier pair, tighten the band's centre.
+                        best_score = score
+        # `active` holds at least three labels here, so the pair loop above always ran and
+        # `best_pair` is always set; asserting it is how the type narrows without a dead branch.
+        assert best_pair is not None
+        left, right = best_pair
         left_slot, right_slot = slots[left], slots[right]
         distance = float(work[left_slot, right_slot])
         delta = (row_sums[left] - row_sums[right]) / (count - 2)
@@ -117,7 +147,6 @@ def build_neighbor_joining(
             ]
         )
         remaining = [node for node in active if node not in (left, right)]
-        internal_sum = 0.0
         for other in remaining:
             other_slot = slots[other]
             left_distance = float(work[left_slot, other_slot])
@@ -125,15 +154,10 @@ def build_neighbor_joining(
             updated = 0.5 * (left_distance + right_distance - distance)
             work[left_slot, other_slot] = updated
             work[other_slot, left_slot] = updated
-            row_sums[other] = row_sums[other] - left_distance - right_distance + updated
-            internal_sum += updated
         work[left_slot, left_slot] = 0.0
         slots.pop(left)
         slots.pop(right)
-        row_sums.pop(left)
-        row_sums.pop(right)
         slots[internal] = left_slot
-        row_sums[internal] = internal_sum
         active = [*remaining, internal]
 
     active.sort()

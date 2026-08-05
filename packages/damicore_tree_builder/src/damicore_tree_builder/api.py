@@ -55,7 +55,7 @@ def build_tree(
     destination.mkdir(parents=True, exist_ok=True)
     if (destination / "tree.json").exists() or (destination / "tree.nwk").exists():
         raise TreeBuilderError(
-            "Tree outputs already exist without a reusable receipt",
+            "Tree outputs already exist in the output directory",
             code="output_directory_conflict_error",
         )
     labels, display_labels = _load_labels(Path(labels_path).resolve())

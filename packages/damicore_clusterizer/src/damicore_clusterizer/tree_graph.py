@@ -57,8 +57,10 @@ def _load_tree_graph(path: Path) -> GraphInput:
         raise ClusterizerError("Invalid tree artifact", code="tree_format_error") from exc
 
     node_ids = [node.id for node in nodes]
-    if len(node_ids) != len(set(node_ids)) or root_id not in node_ids:
-        raise ClusterizerError("Tree nodes are not unique", code="tree_format_error")
+    if len(node_ids) != len(set(node_ids)):
+        raise ClusterizerError("Tree node ids are not unique", code="tree_format_error")
+    if root_id not in node_ids:
+        raise ClusterizerError("Tree root_id names no node", code="tree_format_error")
     root_node = next(node for node in nodes if node.id == root_id)
     if root_node.kind != "internal":
         raise ClusterizerError("Tree root must be internal", code="tree_format_error")
@@ -93,8 +95,6 @@ def _load_tree_graph(path: Path) -> GraphInput:
     left, right = root_edges
     graph_edges.append((index[left.target], index[right.target]))
     lengths.append(left.length + right.length)
-    if not lengths:
-        raise ClusterizerError("Tree has no edges", code="tree_format_error")
     if any(not math.isfinite(length) for length in lengths):
         raise ClusterizerError("Branch lengths must be finite", code="tree_format_error")
     if len(graph_edges) != len(retained_nodes) - 1:

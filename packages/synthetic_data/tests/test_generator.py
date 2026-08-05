@@ -1,3 +1,6 @@
+import csv
+import zlib
+from itertools import combinations
 from pathlib import Path
 
 import pytest
@@ -5,6 +8,31 @@ import pytest
 from synthetic_data import generate_csv
 
 pytestmark = pytest.mark.unit
+
+
+def _objects(path: Path, axis: str) -> list[bytes]:
+    """Return the canonical bytes DAMICORE would compress: one object per column, or per row."""
+    with path.open("r", encoding="utf-8", newline="") as stream:
+        rows = list(csv.reader(stream))
+    body = rows[1:]
+    if axis == "rows":
+        return ["".join(row).encode("utf-8") for row in body]
+    return ["".join(row[index] for row in body).encode("utf-8") for index in range(len(rows[0]))]
+
+
+def _ncd(left: bytes, right: bytes) -> float:
+    """Normalized Compression Distance, computed exactly as damicore_distance does it.
+
+    Recomputed here from the standard library rather than imported: synthetic_data is test
+    infrastructure and must not depend on a stage package.
+    """
+
+    def compressed(payload: bytes) -> int:
+        stream = zlib.compressobj(level=6, wbits=31)
+        return len(stream.compress(payload)) + len(stream.flush())
+
+    cx, cy = compressed(left), compressed(right)
+    return (compressed(left + right) - min(cx, cy)) / max(cx, cy)
 
 
 def test_generate_csv_is_streaming_and_deterministic(tmp_path: Path) -> None:
@@ -33,6 +61,43 @@ def test_generate_csv_rejects_invalid_dimensions(
 ) -> None:
     with pytest.raises(ValueError):
         generate_csv(tmp_path / "bad.csv", rows=rows, columns=columns, clusters=clusters, seed=1)
+
+
+# Both split modes are exercised: spec section 23 requires controllable groups of columns AND
+# of rows, and the pipeline is run over both. The standard e2e fixture shape is included.
+@pytest.mark.parametrize(
+    ("axis", "rows", "columns", "clusters"),
+    [
+        pytest.param("columns", 24, 8, 2, id="columns-standard-e2e-fixture"),
+        pytest.param("columns", 12, 6, 3, id="columns-three-groups"),
+        pytest.param("rows", 24, 8, 2, id="rows-standard-e2e-fixture"),
+        pytest.param("rows", 12, 6, 3, id="rows-three-groups"),
+    ],
+)
+def test_cluster_members_are_measurably_closer_under_ncd(
+    tmp_path: Path, axis: str, rows: int, columns: int, clusters: int
+) -> None:
+    """The fixture must carry structure the pipeline can actually recover, and NCD is how it
+    looks. Asserting that group members merely share a label would certify a property no
+    compressor can see -- which is what an earlier version of this test did, while the
+    measured separation sat inside the noise.
+    """
+    path = generate_csv(
+        tmp_path / "clustered.csv", rows=rows, columns=columns, clusters=clusters, seed=42
+    )
+    objects = _objects(path, axis)
+    within = [
+        _ncd(objects[i], objects[j])
+        for i, j in combinations(range(len(objects)), 2)
+        if i % clusters == j % clusters
+    ]
+    between = [
+        _ncd(objects[i], objects[j])
+        for i, j in combinations(range(len(objects)), 2)
+        if i % clusters != j % clusters
+    ]
+    assert within and between
+    assert max(within) < min(between)
 
 
 def test_generate_csv_rejects_a_multi_character_delimiter(tmp_path: Path) -> None:
