@@ -58,6 +58,35 @@ def _read_header(path: Path, config: NormalizationConfig) -> list[str]:
     return header
 
 
+def _validate_record_widths(path: Path, config: NormalizationConfig, width: int) -> None:
+    """Reject any record whose field count disagrees with the mandatory header.
+
+    ``on_bad_lines="error"`` cannot express this rule on its own. When every data row carries
+    surplus fields, the C parser reads the leading ones as an index and those cells disappear;
+    when only a later row does, the surplus is dropped or reported depending on where the chunk
+    boundary falls; a short row is padded with a cell the input never contained. The canonical
+    bytes would then depend on ``chunk_rows``, which section 24.1 forbids.
+
+    ``csv.reader`` agrees with pandas on record boundaries and field counts for every dialect
+    this contract allows, so one streaming pass over the raw records makes the check total. A
+    blank line is the single exception: ``skip_blank_lines=False`` defines it as a full-width
+    empty row, and pandas materializes it as one.
+    """
+    try:
+        with path.open("r", encoding=config.encoding, errors="strict", newline="") as stream:
+            reader = csv.reader(stream, delimiter=config.delimiter)
+            next(reader, None)
+            for number, record in enumerate(reader, start=2):
+                if record and len(record) != width:
+                    raise NormalizerError(
+                        f"CSV line {number} has {len(record)} fields but the header declares "
+                        f"{width}",
+                        code="csv_format_error",
+                    )
+    except (OSError, UnicodeError, csv.Error) as exc:
+        raise NormalizerError("CSV parsing failed", code="csv_format_error") from exc
+
+
 def scan_csv(
     csv_path: str | Path,
     config: NormalizationConfig,
@@ -77,6 +106,10 @@ def scan_csv(
             "columns split requires at least two columns",
             code="csv_format_error",
         )
+
+    # Structure is settled before anything is created, so a malformed CSV never leaves a
+    # partially written objects directory behind.
+    _validate_record_widths(path, config, len(header))
 
     if objects_dir is not None:
         objects_dir.mkdir(parents=True, exist_ok=False)
@@ -102,6 +135,9 @@ def scan_csv(
             quotechar='"',
             doublequote=True,
             comment=None,
+            # No inference of any kind, including an index inferred from row width. Records
+            # are already known to match the header, so this only pins the parser's contract.
+            index_col=False,
         )
         for chunk in chunks:
             if list(chunk.columns) != header:
