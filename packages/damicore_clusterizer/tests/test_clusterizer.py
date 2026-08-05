@@ -1,11 +1,13 @@
 import csv
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import damicore_clusterizer.artifacts as artifacts
 from damicore_clusterizer import ClusterConfig, ClusterizerError, cluster_tree
 
 pytestmark = pytest.mark.unit
@@ -150,6 +152,34 @@ def test_invalid_tree_contract_is_rejected(tmp_path: Path, mutation: TreeMutatio
     source.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ClusterizerError):
         cluster_tree(source, tmp_path / "invalid")
+
+
+# Both artifacts are written through their own temporary file, so each rename is a separate
+# place a partial file could survive a failure. The index selects which one fails.
+@pytest.mark.parametrize(
+    "failing_rename",
+    [pytest.param(1, id="membership-csv"), pytest.param(2, id="clusters-json")],
+)
+def test_a_failed_artifact_write_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing_rename: int
+) -> None:
+    renames = 0
+    real_replace = os.replace
+
+    def counting_replace(src: object, dst: object) -> None:
+        nonlocal renames
+        renames += 1
+        if renames == failing_rename:
+            raise OSError("simulated failure while committing an artifact")
+        real_replace(src, dst)  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(artifacts.os, "replace", counting_replace)
+    output = tmp_path / "out"
+    with pytest.raises(OSError):
+        cluster_tree(_tree(tmp_path), output)
+
+    assert not list(output.glob(".membership.*"))
+    assert not list(output.glob(".clusters.json.*"))
 
 
 def test_invalid_json_is_rejected(tmp_path: Path) -> None:
