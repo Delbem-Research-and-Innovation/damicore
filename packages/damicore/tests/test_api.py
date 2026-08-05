@@ -165,3 +165,51 @@ def test_load_result_rejects_extra_manifest_fields(tmp_path: Path) -> None:
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ArtifactValidationError):
         load_result(output)
+
+
+def test_a_relative_path_escaping_the_run_directory_is_rejected() -> None:
+    from damicore.result import _contained_relative_path
+
+    for value in ["/absolute/path", "../escape", ""]:
+        with pytest.raises(ArtifactValidationError, match="contained relative POSIX path"):
+            _contained_relative_path(value)
+
+
+# Each row tampers with the manifest a completed run wrote, then asks save() to trust it.
+# save() copies bytes out of the run directory, so every clause it checks is the difference
+# between exporting verified artifacts and exporting whatever the manifest happens to name.
+SAVE_REJECTIONS = [
+    pytest.param("not-completed", "Only completed artifacts", id="status-not-completed"),
+    pytest.param("missing-source", "source does not exist", id="artifact-source-missing"),
+    pytest.param("manifest-collision", "duplicate target", id="target-collides-with-manifest"),
+]
+
+
+@pytest.mark.parametrize(("tamper", "discriminator"), SAVE_REJECTIONS)
+def test_save_rejects_a_tampered_inventory(tmp_path: Path, tamper: str, discriminator: str) -> None:
+    output = tmp_path / "run"
+    result = run(
+        _csv(tmp_path),
+        output_dir=output,
+        progress=False,
+        execution=ExecutionConfig(workers=1),
+    )
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    key = next(iter(manifest["artifacts"]))
+    if tamper == "not-completed":
+        manifest["status"] = "interrupted"
+    elif tamper == "missing-source":
+        record = dict(manifest["artifacts"][key])
+        record["path"] = "absent.bin"
+        manifest["artifacts"]["absent.bin"] = record
+    else:
+        record = dict(manifest["artifacts"][key])
+        record["path"] = "manifest.json"
+        manifest["artifacts"]["manifest.json"] = record
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    destination = tmp_path / "saved"
+    with pytest.raises(ArtifactValidationError, match=discriminator):
+        result.save(destination)
+    result.close()

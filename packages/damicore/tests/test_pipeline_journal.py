@@ -49,3 +49,100 @@ def test_journal_rejects_checkpoint_schema_extensions(tmp_path: Path) -> None:
     journal.checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
     with pytest.raises(CheckpointMismatchError):
         PipelineJournal(run_dir, manifest)
+
+
+def test_a_checkpoint_from_a_different_runtime_blocks_resume(tmp_path: Path) -> None:
+    """A resume reuses artifacts produced by another interpreter or library build only if the
+    fingerprint still matches; otherwise the bytes on disk are not the bytes this run would
+    have produced."""
+    run_dir, manifest = _manifest(tmp_path)
+    PipelineJournal(run_dir, manifest)
+    checkpoint_path = run_dir / "checkpoints" / "pipeline.json"
+    payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    payload["runtime"]["python"] = "0.0.0-not-this-interpreter"
+    checkpoint_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(CheckpointMismatchError, match="Runtime fingerprint differs"):
+        PipelineJournal(run_dir, manifest)
+
+
+def test_an_unreadable_checkpoint_is_rejected(tmp_path: Path) -> None:
+    run_dir, manifest = _manifest(tmp_path)
+    PipelineJournal(run_dir, manifest)
+    (run_dir / "checkpoints" / "pipeline.json").write_text("not json", encoding="utf-8")
+    with pytest.raises(CheckpointMismatchError, match="unreadable"):
+        PipelineJournal(run_dir, manifest)
+
+
+# Each row is one reason a completed receipt must not be reused. They are separate because a
+# reuse decision that silently says "yes" skips a whole stage.
+def test_a_receipt_from_a_changed_runtime_is_not_reusable(tmp_path: Path) -> None:
+    run_dir, manifest = _manifest(tmp_path)
+    journal = PipelineJournal(run_dir, manifest)
+    journal.receipts["normalize"] = {
+        "status": "completed",
+        "runtime": {**journal.runtime, "numpy": "0.0.0"},
+        "outputs": [{"path": "out.txt", "size_bytes": 1, "sha256": "0" * 64}],
+    }
+    with pytest.raises(CheckpointMismatchError, match="Runtime changed for stage"):
+        journal.reusable("normalize")
+
+
+def test_a_receipt_without_outputs_is_not_reusable(tmp_path: Path) -> None:
+    run_dir, manifest = _manifest(tmp_path)
+    journal = PipelineJournal(run_dir, manifest)
+    journal.receipts["normalize"] = {
+        "status": "completed",
+        "runtime": journal.runtime,
+        "outputs": [],
+    }
+    with pytest.raises(CheckpointMismatchError, match="no output receipt"):
+        journal.reusable("normalize")
+
+
+def test_a_receipt_output_pointing_outside_the_run_directory_is_rejected(tmp_path: Path) -> None:
+    """The receipt is read back from disk, so its recorded path is untrusted input: a
+    traversal there would make the journal verify -- and reuse -- a file it never wrote."""
+    run_dir, manifest = _manifest(tmp_path)
+    journal = PipelineJournal(run_dir, manifest)
+    journal.receipts["normalize"] = {
+        "status": "completed",
+        "runtime": journal.runtime,
+        "outputs": [{"path": "../escape.txt", "size_bytes": 1, "sha256": "0" * 64}],
+    }
+    with pytest.raises(ArtifactValidationError, match="escapes the run directory"):
+        journal.reusable("normalize")
+
+
+def test_a_stage_output_outside_the_run_directory_is_rejected(tmp_path: Path) -> None:
+    run_dir, manifest = _manifest(tmp_path)
+    journal = PipelineJournal(run_dir, manifest)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("planted", encoding="utf-8")
+    started = journal.stage_started("normalize", [])
+    with pytest.raises(ArtifactValidationError, match="Receipt path escapes"):
+        journal.stage_completed("normalize", started, [outside], {})
+
+
+def test_a_stage_input_that_is_not_a_regular_file_is_rejected(tmp_path: Path) -> None:
+    run_dir, manifest = _manifest(tmp_path)
+    journal = PipelineJournal(run_dir, manifest)
+    with pytest.raises(ArtifactValidationError, match="not a regular file"):
+        journal.stage_started("normalize", [tmp_path / "absent.csv"])
+
+
+def test_an_uninstalled_sibling_package_is_recorded_as_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fingerprint must still be produced when a sibling distribution is absent -- the
+    stage packages are independently installable, so this is a supported configuration."""
+    import damicore.pipeline as pipeline_module
+
+    real_version = pipeline_module.version
+
+    def missing_clusterizer(name: str) -> str:
+        if name == "damicore-clusterizer":
+            raise pipeline_module.PackageNotFoundError(name)
+        return real_version(name)
+
+    monkeypatch.setattr(pipeline_module, "version", missing_clusterizer)
+    assert pipeline_module.runtime_fingerprint()["damicore-clusterizer"] == "unknown"
