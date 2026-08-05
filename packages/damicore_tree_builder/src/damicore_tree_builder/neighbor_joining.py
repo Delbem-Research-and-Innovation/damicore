@@ -99,8 +99,9 @@ def build_neighbor_joining(
                     candidate = (score, left, right)
                     if best is None or candidate < best:
                         best = candidate
-        if best is None:
-            raise TreeBuilderError("Neighbor Joining could not select a pair")
+        # `active` holds at least three labels here, so the pair loop above always ran and
+        # `best` is always set; asserting it is how the type narrows without a dead branch.
+        assert best is not None
         _, left, right = best
         left_slot, right_slot = slots[left], slots[right]
         distance = float(work[left_slot, right_slot])
