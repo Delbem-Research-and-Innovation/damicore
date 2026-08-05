@@ -5,6 +5,7 @@ from typing import Literal
 
 import pytest
 
+import damicore_normalizer.api as api
 import damicore_normalizer.csv_reader as csv_reader
 from damicore_normalizer import NormalizationConfig, NormalizerError, normalize_csv
 
@@ -209,6 +210,49 @@ def test_more_columns_than_the_open_file_limit_stay_complete(
         assert payload == "".join(f'"r{row}c{index:03d}"\n' for row in range(3)).encode("utf-8")
         assert hashlib.sha256(payload).hexdigest() == item.sha256
         assert len(payload) == item.size_bytes
+
+
+def test_input_drift_during_normalization_is_detected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Specification section 19: input_drift is the one specialized code in v0.1 — it guards
+    against silently normalizing a CSV that changed underneath the running scan."""
+    source = _csv(tmp_path)
+    real_scan_csv = api.scan_csv
+
+    def mutating_scan_csv(
+        csv_path: str | Path, config: NormalizationConfig, *, objects_dir: Path
+    ) -> csv_reader.ScanResult:
+        result = real_scan_csv(csv_path, config, objects_dir=objects_dir)
+        source.write_text('name,note\nAna,"a,b"\nBia,""\nCid,""\n', encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(api, "scan_csv", mutating_scan_csv)
+    with pytest.raises(NormalizerError) as raised:
+        normalize_csv(source, tmp_path / "out")
+    assert raised.value.code == "input_drift"
+
+
+def test_a_corrupted_written_object_fails_artifact_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The post-write hash/size re-check guards against a written object silently diverging
+    from what the manifest will claim — corrupt one object and confirm it is caught."""
+    source = _csv(tmp_path)
+    real_scan_csv = api.scan_csv
+
+    def corrupting_scan_csv(
+        csv_path: str | Path, config: NormalizationConfig, *, objects_dir: Path
+    ) -> csv_reader.ScanResult:
+        result = real_scan_csv(csv_path, config, objects_dir=objects_dir)
+        first_object = objects_dir / result.objects[0].relative_path.removeprefix("objects/")
+        first_object.write_bytes(b"corrupted\n")
+        return result
+
+    monkeypatch.setattr(api, "scan_csv", corrupting_scan_csv)
+    with pytest.raises(NormalizerError) as raised:
+        normalize_csv(source, tmp_path / "out")
+    assert raised.value.code == "artifact_validation_error"
 
 
 def test_output_must_be_empty_and_user_files_survive(tmp_path: Path) -> None:
