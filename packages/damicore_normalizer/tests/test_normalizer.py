@@ -178,15 +178,28 @@ def test_malformed_input_is_rejected_as_a_csv_format_error(
     assert not (output / "objects").exists()
 
 
-def test_a_field_beyond_the_csv_size_limit_is_rejected(tmp_path: Path) -> None:
-    """csv.Error (here, a field past csv.field_size_limit()) can surface only once a data
-    row is reached: _read_header's single next() call returns before its field grows that
-    large, so this is the one case that reaches _validate_record_widths's own try/except."""
-    source = tmp_path / "oversized_field.csv"
-    source.write_text("a,b\n1," + "x" * 200_000 + "\n", encoding="utf-8")
-    with pytest.raises(NormalizerError) as raised:
-        normalize_csv(source, tmp_path / "out")
-    assert raised.value.code == "csv_format_error"
+def test_a_field_wider_than_the_csv_module_default_round_trips(tmp_path: Path) -> None:
+    """Section 10.1 sets no field-size limit, and pandas imposes none. csv's own 131072-char
+    default applies only to the validation passes, so it must not become an input restriction
+    the normalizer invents: a wide cell is well-formed and its bytes must survive intact."""
+    wide = "x" * 200_000
+    source = tmp_path / "wide_field.csv"
+    source.write_text(f"a,b\n1,{wide}\n", encoding="utf-8")
+    result = normalize_csv(source, tmp_path / "out")
+    assert result.object_count == 2
+    assert (tmp_path / "out/objects/column_000002.jsonl").read_bytes() == f'"{wide}"\n'.encode()
+
+
+def test_a_utf8_bom_is_stripped_rather_than_read_as_part_of_the_first_header(
+    tmp_path: Path,
+) -> None:
+    """pandas' C parser strips a leading BOM. The csv.reader validation passes must agree, or
+    every spreadsheet-exported CSV is rejected with a header-changed error it cannot act on."""
+    source = tmp_path / "bom.csv"
+    source.write_bytes("name,note\nAna,x\nBia,y\n".encode("utf-8-sig"))
+    result = normalize_csv(source, tmp_path / "out")
+    assert [item.label for item in result.objects] == ["name", "note"]
+    assert (tmp_path / "out/objects/column_000001.jsonl").read_bytes() == b'"Ana"\n"Bia"\n'
 
 
 def test_a_header_change_mid_parse_is_rejected(

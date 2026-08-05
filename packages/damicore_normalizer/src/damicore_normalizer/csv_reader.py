@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import codecs
 import csv
 import hashlib
 from collections import OrderedDict
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -13,6 +16,39 @@ from damicore_normalizer.config import NormalizationConfig
 from damicore_normalizer.errors import NormalizerError
 from damicore_normalizer.manifest import ObjectDescriptor
 from damicore_normalizer.serializer import serialize_cell, serialize_row
+
+# A single field may be this many characters during the csv.reader passes. csv defaults to
+# 131072, which pandas does not impose, so without this a well-formed wide cell would be
+# reported as malformed. The value is a bound the C long behind field_size_limit accepts on
+# every supported platform, not a contract: section 10.1 sets no field-size limit.
+_MAX_FIELD_CHARS = 2**31 - 1
+
+
+def _strip_bom(header: list[str], encoding: str) -> list[str]:
+    """Drop a leading UTF-8 BOM from the first column name, as pandas' C parser does.
+
+    Python's ``utf-8`` codec keeps the BOM, so without this the two readers disagree on the
+    first name and the per-chunk header check rejects a well-formed file. Decoding through
+    ``utf-8-sig`` instead would buffer past the header, which would misreport an undecodable
+    data row as a header failure.
+    """
+    if not header or codecs.lookup(encoding).name != "utf-8":
+        return header
+    return [header[0].removeprefix("\ufeff"), *header[1:]]
+
+
+@contextmanager
+def _relaxed_field_size_limit() -> Generator[None]:
+    """Lift csv's field-size cap for the duration of a validation pass.
+
+    The cap is process-global state, so it is restored on exit; the passes it wraps are
+    synchronous and do not run user code.
+    """
+    previous = csv.field_size_limit(_MAX_FIELD_CHARS)
+    try:
+        yield
+    finally:
+        csv.field_size_limit(previous)
 
 
 @dataclass(frozen=True)
@@ -47,8 +83,13 @@ class _FilePool:
 
 def _read_header(path: Path, config: NormalizationConfig) -> list[str]:
     try:
-        with path.open("r", encoding=config.encoding, errors="strict", newline="") as stream:
-            header = next(csv.reader(stream, delimiter=config.delimiter))
+        with (
+            _relaxed_field_size_limit(),
+            path.open("r", encoding=config.encoding, errors="strict", newline="") as stream,
+        ):
+            header = _strip_bom(
+                next(csv.reader(stream, delimiter=config.delimiter)), config.encoding
+            )
     except (OSError, UnicodeError, csv.Error, StopIteration) as exc:
         raise NormalizerError("Could not read a valid CSV header", code="csv_format_error") from exc
     if not header or any(name == "" for name in header):
@@ -73,7 +114,10 @@ def _validate_record_widths(path: Path, config: NormalizationConfig, width: int)
     empty row, and pandas materializes it as one.
     """
     try:
-        with path.open("r", encoding=config.encoding, errors="strict", newline="") as stream:
+        with (
+            _relaxed_field_size_limit(),
+            path.open("r", encoding=config.encoding, errors="strict", newline="") as stream,
+        ):
             reader = csv.reader(stream, delimiter=config.delimiter)
             next(reader, None)
             for number, record in enumerate(reader, start=2):
