@@ -13,6 +13,7 @@ from damicore import (
     ConfigurationError,
     ExecutionConfig,
     OutputDirectoryConflictError,
+    ResourceEstimate,
     ResourceLimitError,
     ResourceLimits,
     estimate,
@@ -53,6 +54,42 @@ def test_invalid_configuration_fails_before_csv_read(
     missing = tmp_path / "missing.csv"
     with pytest.raises(ConfigurationError, match=message):
         estimate(missing, split=split, delimiter=delimiter, encoding=encoding)
+
+
+def test_too_many_requested_clusters_is_rejected_before_any_stage_runs(tmp_path: Path) -> None:
+    """Specification sections 9.1 and 9.2: the leaf bound belongs to the argument contract,
+    so it must fail as configuration at preflight rather than as a clusterizer failure after
+    normalization, the NCD matrix and the tree have already been computed."""
+    output = tmp_path / "over-requested"
+    with pytest.raises(ConfigurationError, match="num_clusters"):
+        run(
+            _csv(tmp_path),
+            num_clusters=4,
+            output_dir=output,
+            progress=False,
+            execution=ExecutionConfig(workers=1),
+        )
+    assert not output.exists()
+
+
+def test_resource_limit_error_explains_the_object_count_distinction(tmp_path: Path) -> None:
+    """Specification section 11.3 requires the exception itself, not only the README, to
+    state that CSV size and object count scale differently."""
+    with pytest.raises(ResourceLimitError, match="max_objects") as raised:
+        run(
+            _csv(tmp_path),
+            split="rows",
+            output_dir=tmp_path / "rows-limited",
+            progress=False,
+            execution=ExecutionConfig(workers=1, limits=ResourceLimits(max_objects=1)),
+        )
+    message = str(raised.value)
+    assert "quadratic" in message
+    assert "split='columns'" in message
+    assert "split='rows'" in message
+    carried = raised.value.context["estimate"]
+    assert isinstance(carried, ResourceEstimate)
+    assert carried.violations == ["max_objects"]
 
 
 def test_run_rejects_limits_and_conflicting_directories(tmp_path: Path) -> None:
