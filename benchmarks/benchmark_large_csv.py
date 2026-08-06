@@ -9,10 +9,14 @@ import time
 from pathlib import Path
 
 from damicore import ExecutionConfig, ResourceLimits, estimate, run
+from damicore_normalizer import NormalizationConfig, normalize_csv
 from synthetic_data import generate_csv
 
 # Object counts required by specification section 24.4.
 OBJECT_COUNTS = (100, 250, 500, 1_000)
+
+# Specification section 24.4 budgets 1.5 GiB of peak RSS while normalizing the large input.
+NORMALIZATION_RSS_BUDGET_BYTES = 1_610_612_736
 
 
 def _directory_bytes(directory: Path) -> int:
@@ -21,8 +25,39 @@ def _directory_bytes(directory: Path) -> int:
 
 def _peak_rss_bytes() -> int:
     # ru_maxrss is KiB on Linux; every measurement below reports bytes so the two benchmarks
-    # in this file stay comparable.
+    # in this file stay comparable. It is a high-water mark for the whole process, so a value
+    # read after several stages covers all of them. That direction is safe for a budget: it
+    # can raise a false alarm, never hide an overrun.
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+
+
+def _rows_for_target(directory: Path, target_bytes: int, columns: int) -> int:
+    # Measured from a probe rather than assumed, because the generator owns its cell width and
+    # a hardcoded constant silently overshot the target more than threefold. Preflight alone
+    # survived that; normalization writes the objects too, so the working set is roughly twice
+    # the CSV and an overshoot is the difference between fitting on a runner and filling it.
+    probe_rows = 1_000
+    probe = generate_csv(
+        directory / "width-probe.csv",
+        rows=probe_rows,
+        columns=columns,
+        clusters=4,
+        seed=42,
+    )
+    bytes_per_row = probe.stat().st_size / probe_rows
+    probe.unlink()
+    # The probe's header inflates bytes_per_row by well under a tenth of a percent, so this
+    # lands just below the target rather than above it. The 90% floor asserted later absorbs
+    # that, and undershooting is the safe direction for a disk-bound measurement.
+    return max(1, math.ceil(target_bytes / bytes_per_row))
+
+
+def _emit(measurements: dict[str, object], output: Path | None) -> None:
+    payload = json.dumps(measurements, indent=2, sort_keys=True) + "\n"
+    sys.stdout.write(payload)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(payload, encoding="utf-8", newline="\n")
 
 
 def main() -> None:
@@ -32,11 +67,13 @@ def main() -> None:
     parser.add_argument("--target-bytes", type=int, default=2_147_483_648)
     # Specification section 24.4 defines two benchmarks with different costs: the large
     # normalization measurement needs a multi-gigabyte working set, while the object sweep is
-    # minutes of CPU. One axis rather than two skip flags, so "neither" cannot be requested.
+    # minutes of CPU. Exactly one per process, and required, so that neither "neither" nor
+    # "both" can be requested: ru_maxrss is a whole-process high-water mark, so a second
+    # measurement in the same process would report the first one's peak as its own.
     parser.add_argument(
         "--select",
-        choices=("large", "sweep", "both"),
-        default="both",
+        choices=("large", "sweep"),
+        required=True,
         help="which of the two specified benchmarks to run",
     )
     parser.add_argument(
@@ -49,9 +86,17 @@ def main() -> None:
             "section 24.4. A caller that narrows this is trading coverage for wall time."
         ),
     )
+    # Specification section 24.4 compares a run against the median of the last three on the
+    # same runner, which is impossible while the numbers only reach stdout of a finished job.
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="also write the measurements as JSON to this path, for run-over-run comparison",
+    )
     arguments = parser.parse_args()
-    run_large: bool = arguments.select in ("large", "both")
-    run_sweep: bool = arguments.select in ("sweep", "both")
+    run_large: bool = arguments.select == "large"
+    run_sweep: bool = arguments.select == "sweep"
     if run_sweep and sorted(arguments.objects) != sorted(OBJECT_COUNTS):
         print(
             f"note: sweeping {sorted(arguments.objects)} instead of the "
@@ -60,8 +105,13 @@ def main() -> None:
         )
     arguments.directory.mkdir(parents=True, exist_ok=True)
     measurements: dict[str, object] = {}
+    # Collected rather than raised, so the measurements are written before the process exits.
+    # A run that broke the budget is the one whose numbers are worth keeping.
+    budget_failures: list[str] = []
     if run_large:
-        large_rows = math.ceil(arguments.target_bytes / (64 * 16))
+        large_rows = _rows_for_target(
+            arguments.directory, arguments.target_bytes, columns=64
+        )
         large_path = generate_csv(
             arguments.directory / "large-64-columns.csv",
             rows=large_rows,
@@ -70,15 +120,39 @@ def main() -> None:
             seed=42,
         )
         large_preview = estimate(large_path, split="columns")
-        peak_rss = _peak_rss_bytes()
-        if large_path.stat().st_size < arguments.target_bytes * 0.9:
-            raise RuntimeError("large benchmark CSV did not reach 90% of target size")
-        if peak_rss > 1_610_612_736:
-            raise RuntimeError("large preflight exceeded the 1.5 GiB RSS budget")
+        preflight_peak_rss = _peak_rss_bytes()
         measurements["large_preflight"] = {
             "input_bytes": large_preview.input_size_bytes,
-            "peak_rss_bytes": peak_rss,
+            "peak_rss_bytes": preflight_peak_rss,
         }
+        # The budgeted stage. Preflight scans the CSV without writing a single object file, so
+        # measuring it alone leaves the stage the specification actually names unmeasured.
+        # Section 24.4 stops here: normalization is the last stage the 1.5 GiB budget covers,
+        # and going further would only add the cubic cost this measurement does not need.
+        started = time.monotonic()
+        normalization = normalize_csv(
+            large_path,
+            arguments.directory / "large-normalization",
+            config=NormalizationConfig(split="columns"),
+        )
+        normalization_seconds = time.monotonic() - started
+        normalization_peak_rss = _peak_rss_bytes()
+        measurements["large_normalization"] = {
+            "input_bytes": large_preview.input_size_bytes,
+            "object_count": normalization.object_count,
+            "normalized_bytes": normalization.total_bytes,
+            "seconds": normalization_seconds,
+            "peak_rss_bytes": normalization_peak_rss,
+        }
+        if large_preview.input_size_bytes < arguments.target_bytes * 0.9:
+            budget_failures.append(
+                "large benchmark CSV did not reach 90% of target size"
+            )
+        if normalization_peak_rss > NORMALIZATION_RSS_BUDGET_BYTES:
+            budget_failures.append(
+                f"large normalization peaked at {normalization_peak_rss} bytes of RSS, "
+                f"above the {NORMALIZATION_RSS_BUDGET_BYTES} byte budget"
+            )
     for objects in sorted(arguments.objects) if run_sweep else ():
         csv_path = generate_csv(
             arguments.directory / f"benchmark-{objects}.csv",
@@ -112,7 +186,11 @@ def main() -> None:
             "run_disk_bytes": _directory_bytes(run_dir),
             "peak_rss_bytes": _peak_rss_bytes(),
         }
-    print(json.dumps(measurements, indent=2, sort_keys=True))
+    _emit(measurements, arguments.output)
+    if budget_failures:
+        for failure in budget_failures:
+            print(f"error: {failure}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

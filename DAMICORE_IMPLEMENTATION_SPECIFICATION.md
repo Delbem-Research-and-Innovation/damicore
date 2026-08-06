@@ -1,9 +1,8 @@
 # DAMICORE — Especificação Final de Arquitetura e Implementação
 
 **Repositório:** Delbem-Research-and-Innovation/damicore  
-**Status:** aprovado para implementação  
-**Versão desta especificação:** 1.0  
-**Data de referência:** 2026-08-03  
+**Status:** implementado; contrato normativo da versão 0.1  
+**Versão desta especificação:** 1.1  
 **Primeira versão de produto:** 0.1.0
 
 ---
@@ -27,6 +26,8 @@ Durante a implementação, a ordem de autoridade é:
 5. READMEs, exemplos e notebooks.
 
 Qualquer divergência entre essas fontes é um defeito. O nível inferior NÃO DEVE redefinir silenciosamente o nível superior. Depois do lançamento, mudanças de contrato exigem atualização conjunta desta especificação, dos modelos, dos testes e da documentação pública.
+
+Este documento não duplica o que o repositório já enuncia de forma executável. Onde ele delega uma listagem — assinaturas, campos de modelo, árvore de arquivos — o código é a fonte daquela listagem e um teste a fixa; a regra sobre a listagem continua sendo desta especificação. Delegar não é rebaixar: uma listagem copiada aqui seria uma segunda verdade livre para divergir em silêncio.
 
 ---
 
@@ -190,113 +191,15 @@ Essa direção DEVE ser fiscalizada por teste AST no CI, que falha se um pacote 
 
 ## 7. Estrutura obrigatória do repositório
 
-~~~text
-damicore/
-├── pyproject.toml
-├── uv.lock
-├── README.md
-├── CHANGELOG.md
-├── DAMICORE_IMPLEMENTATION_SPECIFICATION.md
-├── .python-version
-├── .github/
-│   └── workflows/
-│       ├── ci.yml
-│       ├── build.yml
-│       ├── release.yml
-│       └── weekly-dependencies.yml
-├── docs/
-│   ├── quickstart.md
-│   ├── csv-contract.md
-│   ├── artifacts.md
-│   ├── scalability.md
-│   └── decisions/
-│       ├── 0001-package-boundaries.md
-│       ├── 0002-canonical-csv-serialization.md
-│       ├── 0003-memmap-and-resource-gates.md
-│       └── 0004-exact-local-algorithms.md
-├── notebooks/
-│   └── colab_quickstart.ipynb
-├── packages/
-│   ├── damicore_normalizer/
-│   │   ├── pyproject.toml
-│   │   ├── README.md
-│   │   ├── src/damicore_normalizer/
-│   │   │   ├── __init__.py
-│   │   │   ├── api.py
-│   │   │   ├── config.py
-│   │   │   ├── csv_reader.py
-│   │   │   ├── serializer.py
-│   │   │   ├── manifest.py
-│   │   │   └── errors.py
-│   │   └── tests/
-│   ├── damicore_distance/
-│   │   ├── pyproject.toml
-│   │   ├── README.md
-│   │   ├── src/damicore_distance/
-│   │   │   ├── __init__.py
-│   │   │   ├── api.py
-│   │   │   ├── config.py
-│   │   │   ├── compressor.py
-│   │   │   ├── ncd.py
-│   │   │   ├── shards.py
-│   │   │   ├── matrix.py
-│   │   │   └── errors.py
-│   │   └── tests/
-│   ├── damicore_tree_builder/
-│   │   ├── pyproject.toml
-│   │   ├── README.md
-│   │   ├── src/damicore_tree_builder/
-│   │   │   ├── __init__.py
-│   │   │   ├── api.py
-│   │   │   ├── config.py
-│   │   │   ├── models.py
-│   │   │   ├── neighbor_joining.py
-│   │   │   ├── newick.py
-│   │   │   ├── artifacts.py
-│   │   │   └── errors.py
-│   │   └── tests/
-│   ├── damicore_clusterizer/
-│   │   ├── pyproject.toml
-│   │   ├── README.md
-│   │   ├── src/damicore_clusterizer/
-│   │   │   ├── __init__.py
-│   │   │   ├── api.py
-│   │   │   ├── config.py
-│   │   │   ├── tree_graph.py
-│   │   │   ├── fastgreedy.py
-│   │   │   ├── artifacts.py
-│   │   │   └── errors.py
-│   │   └── tests/
-│   ├── damicore/
-│   │   ├── pyproject.toml
-│   │   ├── README.md
-│   │   ├── src/damicore/
-│   │   │   ├── __init__.py
-│   │   │   ├── api.py
-│   │   │   ├── cli.py
-│   │   │   ├── config.py
-│   │   │   ├── estimate.py
-│   │   │   ├── pipeline.py
-│   │   │   ├── result.py
-│   │   │   ├── manifest.py
-│   │   │   ├── progress.py
-│   │   │   └── errors.py
-│   │   └── tests/
-│   └── synthetic_data/
-│       ├── pyproject.toml
-│       ├── src/synthetic_data/
-│       │   ├── __init__.py
-│       │   └── generator.py
-│       └── tests/
-├── tests/
-│   ├── contracts/
-│   ├── e2e/
-│   ├── notebooks/
-│   └── architecture/
-└── benchmarks/
-    ├── README.md
-    └── benchmark_large_csv.py
-~~~
+O repositório é um workspace uv com packages/ na raiz, mais docs/, notebooks/, tests/ e benchmarks/. São normativos:
+
+- os cinco pacotes publicados e synthetic_data ocupam um diretório cada em packages/, com pyproject.toml, README.md, layout src e tests/ próprios;
+- o diretório do código de cada pacote tem exatamente o nome do seu módulo importável;
+- módulos são nomeados pelo conceito de domínio que possuem, um conceito por módulo;
+- tests/ na raiz guarda somente as suítes que atravessam pacotes: contracts, e2e, notebooks e architecture;
+- o pyproject raiz declara o workspace e não gera distribuição.
+
+A árvore concreta de arquivos NÃO É normativa. Ela é legível no próprio repositório, e fixá-la aqui apenas produz uma cópia que se desatualiza a cada módulo novo. Quais pacotes existem e quais podem ser publicados é decidido pelo teste de arquitetura e pela allowlist do Makefile.
 
 Todos os pacotes usam layout src. Os módulos internos NÃO DEVEM ser reexportados por acidente. Cada __init__.py DEVE declarar __all__ com a API pública descrita neste documento.
 
@@ -384,47 +287,7 @@ O pyproject raiz declara workspace members = ["packages/*"] e não gera distribu
 
 ### 9.1 Assinaturas
 
-~~~python
-from pathlib import Path
-from damicore import (
-    DamicoreResult,
-    ExecutionConfig,
-    ResourceEstimate,
-    ResourceLimits,
-)
-
-
-def estimate(
-    csv_path: str | Path,
-    *,
-    split: str = "columns",
-    delimiter: str = ",",
-    encoding: str = "utf-8",
-    keep_normalized: bool = False,
-    save_diagnostics: bool = False,
-    execution: ExecutionConfig | None = None,
-) -> ResourceEstimate: ...
-
-
-def run(
-    csv_path: str | Path,
-    *,
-    split: str = "columns",
-    delimiter: str = ",",
-    encoding: str = "utf-8",
-    compressor: str = "zlib",
-    compression_level: int = 6,
-    num_clusters: int | None = None,
-    output_dir: str | Path | None = None,
-    keep_normalized: bool = False,
-    save_diagnostics: bool = False,
-    progress: bool = True,
-    execution: ExecutionConfig | None = None,
-) -> DamicoreResult: ...
-
-
-def load_result(output_dir: str | Path) -> DamicoreResult: ...
-~~~
+damicore expõe exatamente estimate, run e load_result. As assinaturas vivem em damicore/api.py e os nomes públicos são fixados por teste de arquitetura; esta seção define o que uma assinatura não expressa.
 
 csv_path aceita somente arquivo regular local existente. URLs e objetos file-like são rejeitados. split aceita exatamente columns ou rows. delimiter DEVE ter um único caractere Unicode. encoding DEVE ser reconhecido por codecs.lookup e usa errors=strict. compressor aceita exatamente zlib ou gzip. compression_level aceita inteiro de 0 a 9.
 
@@ -465,59 +328,7 @@ Para aceitar um problema maior, o usuário precisa fornecer limites maiores expl
 
 ### 9.3 Resultado
 
-~~~python
-class DamicoreResult:
-    membership: pandas.DataFrame
-    clusters: dict[int, list[str]]
-    tree_newick: str
-    distance_matrix: DistanceMatrixView
-    report: RunReport
-    artifacts: ArtifactPaths
-
-    def save(self, output_dir: str | Path) -> ArtifactPaths: ...
-    def close(self) -> None: ...
-~~~
-
-~~~python
-class ArtifactPaths(BaseModel):
-    run_dir: Path
-    manifest: Path
-    report: Path
-    distance_matrix: Path
-    labels: Path
-    tree_json: Path
-    tree_newick: Path
-    membership: Path
-    clusters: Path
-    normalization_dir: Path | None
-    diagnostics_dir: Path | None
-
-
-class RunReport(BaseModel):
-    status: Literal["completed", "failed", "interrupted"]
-    failed_stage: str | None
-    object_count: int
-    pair_count: int
-    community_count: int | None
-    cluster_count: int | None
-    effective_workers: int
-    csv_chunk_rows: int
-    compression_chunk_bytes: int
-    pairs_per_shard: int
-    matrix_bytes: int
-    required_free_disk_bytes: int
-    peak_rss_bytes: int | None
-    ncd_min: float | None
-    ncd_max: float | None
-    ncd_out_of_range_count: int
-    negative_branch_count: int
-    branch_length_shift: float
-    modularity: float | None
-    timings_seconds: dict[str, float]
-    verification: dict[str, bool]
-    warnings: list[str]
-    error: dict[str, object] | None
-~~~
+DamicoreResult expõe membership, clusters, tree_newick, distance_matrix, report e artifacts, mais save e close. Os campos de RunReport e ArtifactPaths são o schema de report.json e dos paths que a CLI imprime; a lista exata é fixada por teste de arquitetura, e alterá-la é mudança de contrato.
 
 No DamicoreResult retornado por run ou load_result, report.status é sempre completed. Reports failed/interrupted existem no disco para diagnóstico e retomada, mas load_result os rejeita.
 
@@ -1390,16 +1201,18 @@ O CI constrói wheels, cria ambiente limpo, instala o wheel damicore, executa no
 
 ### 24.4 Stress e desempenho
 
-Benchmark manual/semanal obrigatório:
+Dois benchmarks obrigatórios, ambos executados por benchmark.yml. O primeiro:
 
 - CSV sintético de 2 GiB, 64 colunas, split=columns;
 - execução de normalização em runner Linux com 8 GiB RAM;
 - pico RSS durante normalização <=1,5 GiB;
 - nenhuma leitura única maior que csv_chunk_rows;
 - matriz aberta por memmap e to_pandas bloqueado conforme limite;
-- execução pode interromper após distância para evitar custo cúbico no benchmark de memória.
+- execução DEVE interromper após a normalização, que é a última etapa coberta pelo teto.
 
-Um segundo benchmark mede NCD e Neighbor Joining para n=100, 250, 500 e 1.000 e registra tempo, disco, RSS e pares/segundo. Não há threshold de tempo portável na versão 0.1; regressão acima de 25% contra a mediana dos três últimos runs no mesmo runner gera alerta, não bloqueio automático.
+O segundo mede NCD e Neighbor Joining para n=100, 250, 500 e 1.000 e registra tempo, disco, RSS e pares/segundo.
+
+O benchmark de 2 GiB é gate de release: release.yml o executa no commit da tag e o estouro do teto reprova a publicação. O segundo não tem threshold de tempo portável na versão 0.1 e roda por workflow_dispatch; regressão acima de 25% contra a mediana dos três últimos runs no mesmo runner gera alerta, não bloqueio automático. Ambos publicam as medições como artefato do run, que é a única série disponível para essa comparação, e as escrevem antes de reprovar, para que os números da falha sobrevivam.
 
 ### 24.5 Cobertura
 
@@ -1433,13 +1246,14 @@ Jobs:
 - instalar apenas damicore e executar e2e;
 - construir novamente e comparar conteúdo lógico do wheel, ignorando metadados ZIP inevitáveis.
 
-### 25.3 weekly-dependencies.yml
+### 25.3 Atualização de dependências
 
-- resolver versões mais novas dentro das faixas;
-- executar suíte completa;
-- pip-audit;
-- benchmark pequeno;
-- abrir issue em falha, sem atualizar lock automaticamente.
+Não existe lane agendada. As atualizações chegam pelo Dependabot, configurado em .github/dependabot.yml para os ecossistemas uv e github-actions:
+
+- alertas e correções de segurança são disparados pela publicação do advisory, não por um intervalo;
+- cada atualização chega como pull request e passa pelos mesmos gates bloqueantes de 25.1 e 25.2, incluindo pip-audit, de modo que a falha é atribuída a um bump específico;
+- o lock NÃO DEVE ser atualizado automaticamente no branch principal; o merge é decisão humana;
+- as faixas declaradas nos pacotes publicados são contrato da seção 8.2. Um pull request que as altere é reprovado pelo teste de arquitetura, não mergeado.
 
 ### 25.4 release.yml
 
@@ -1453,6 +1267,8 @@ Disparo por tag vX.Y.Z. Ordem:
 6. criar GitHub Release com changelog e hashes.
 
 Tokens PyPI persistentes NÃO DEVEM ser armazenados. Artefatos publicados devem ser exatamente os aprovados pelo job de build, sem rebuild entre TestPyPI e PyPI.
+
+O commit da tag é a definição de pronto da versão. Nenhum critério desta especificação é dado por cumprido por inspeção informal: o que reprova qualquer lane de 24.4, 25.1, 25.2 ou deste job não é publicado.
 
 ---
 
@@ -1485,107 +1301,7 @@ Cada evento inclui run_id, stage e métricas escalares. Conteúdo do CSV e dos o
 
 ---
 
-## 28. Plano de implementação com gates
-
-### 28.1 Migração do estado atual
-
-As implementações existentes são substituídas, não encapsuladas por compatibilidade fictícia:
-
-| Área atual | Ação obrigatória |
-|---|---|
-| normalizer com composite_keys, key_columns inefetivo e CSV fixo em ponto e vírgula/Latin-1 | remover essa semântica e implementar exclusivamente columns/rows e o contrato da seção 10 |
-| distance somente gzip nível 9, float32, clamp e releitura integral | substituir por zlib padrão, float64, fórmula sem clamp, chunks, cache, memmap e shards |
-| export de matriz dependente de filename/diretório | substituir por paths pathlib validados e artefatos canônicos |
-| tree-builder já funcional | preservar fixtures válidas, adicionar contratos, memmap, tie-break, tree.json e Newick sem raiz espúria :0 |
-| clusterizer placeholder | implementar integralmente a seção 16 |
-| orquestrador termina na árvore e retorna outputs heterogêneos | substituir pelo pipeline, resultado e estados desta especificação |
-| scripts auxiliares do legado | não portar, salvo código mínimo necessário aos quatro algoritmos aprovados |
-
-Como a API 0.1 ainda será o primeiro contrato público completo, não se mantém compatibilidade com comportamentos acidentais atuais. Testes que codifiquem os comportamentos removidos devem ser substituídos por testes normativos, não adaptados para preservar defeitos.
-
-### Fase 1 — Base e contratos
-
-Entregas:
-
-- reestruturar workspace e pyprojects;
-- modelos Pydantic, exceções e schemas;
-- fixtures de contrato;
-- teste de direção de imports;
-- CI de lint, tipos e build básico.
-
-Gate: todos os cinco wheels constroem, instalam e expõem apenas APIs aprovadas.
-
-### Fase 2 — Normalizer e preflight
-
-Entregas:
-
-- contrato CSV;
-- normalização columns/rows em chunks;
-- manifesto, hashes, estimativa e limites;
-- testes de determinismo e memória.
-
-Gate: dois chunk sizes produzem artefatos idênticos e rows inviável falha antes de criar objetos.
-
-### Fase 3 — Distance
-
-Entregas:
-
-- zlib/gzip incremental;
-- cache C(x), shards, ProcessPool e memmap;
-- checkpoint/resume;
-- validação final e diagnósticos opcionais.
-
-Gate: serial/paralelo/retomado são bit a bit iguais e nenhuma concatenação é materializada.
-
-### Fase 4 — Tree builder
-
-Entregas:
-
-- Neighbor Joining determinístico;
-- workspace memmap com slots reutilizados;
-- tree.json/Newick;
-- fixtures matemáticas e validações.
-
-Gate: topologia, comprimentos e folhas passam fixtures; memória RAM não cresce como uma segunda matriz.
-
-### Fase 5 — Clusterizer
-
-Entregas:
-
-- conversão não enraizada;
-- peso, shift e FastGreedy;
-- membership e clusters determinísticos;
-- corte automático e k.
-
-Gate: cada folha pertence exatamente a um cluster e runs repetidos são idênticos.
-
-### Fase 6 — Orquestrador e notebook
-
-Entregas:
-
-- estimate, run, load_result e DamicoreResult;
-- estado, receipts, reuse, resume e progresso;
-- CLI;
-- quickstart e notebook Colab executável.
-
-Gate: wheel damicore isolado executa e2e columns/rows e notebook sem checkout, apt ou sys.path.
-
-### Fase 7 — Hardening e release
-
-Entregas:
-
-- stress de 2 GiB;
-- auditoria de dependências;
-- documentação final sincronizada;
-- TestPyPI e release candidate.
-
-Gate: todos os critérios da seção 30 estão comprovados no commit da tag.
-
-Uma fase não deve começar a integrar ao branch principal sem o gate anterior. Trabalho paralelo é permitido em branches, mas os contratos da Fase 1 são a autoridade comum.
-
----
-
-## 29. Rastreabilidade de decisões
+## 28. Rastreabilidade de decisões
 
 | Objetivo | Decisão | Enforcement | Evidência |
 |---|---|---|---|
@@ -1602,72 +1318,7 @@ Uma fase não deve começar a integrar ao branch principal sem o gate anterior. 
 
 ---
 
-## 30. Definition of Done do repositório
-
-A versão 0.1 só está concluída quando todos os itens forem verdadeiros:
-
-### Produto e API
-
-- [ ] pip install damicore funciona em Python 3.11–3.14.
-- [ ] estimate, run e load_result obedecem às assinaturas normativas.
-- [ ] columns e rows funcionam a partir de caminho CSV.
-- [ ] DamicoreResult entrega todos os campos e limites de materialização.
-- [ ] CLI é apenas adaptador da API.
-
-### Correção
-
-- [ ] serialização canônica é determinística.
-- [ ] NCD usa a fórmula exata e não aplica clamp.
-- [ ] matriz é float64, simétrica, finita e diagonal zero.
-- [ ] Neighbor Joining passa fixtures matemáticas e tie-break determinístico.
-- [ ] árvore tem exatamente todas as folhas.
-- [ ] FastGreedy usa todos os nós e retorna apenas folhas.
-- [ ] membership é completa, exclusiva e determinística.
-
-### Escala e recuperação
-
-- [ ] nenhum estágio carrega o CSV inteiro em RAM.
-- [ ] concatenação xy nunca é materializada.
-- [ ] matriz e workspace da árvore usam memmap.
-- [ ] preflight bloqueia contagens, pares, matriz ou disco acima dos limites.
-- [ ] rows inviável falha antes de criar arquivos por linha.
-- [ ] shards incompletos não são reutilizados.
-- [ ] execução retomada é idêntica à limpa.
-- [ ] benchmark de 2 GiB atende o limite de RSS.
-
-### Artefatos e operação
-
-- [ ] schemas, hashes, paths e estados são validados.
-- [ ] completed só é escrito depois da verificação cruzada.
-- [ ] diretório incompatível nunca é apagado ou sobrescrito.
-- [ ] logs não contêm dados de células.
-- [ ] relatório permite reconstruir configuração e versões.
-- [ ] load_result detecta corrupção.
-
-### Modularidade e distribuição
-
-- [ ] pacotes de estágio não se importam.
-- [ ] synthetic_data não entra em wheel runtime nem docs do usuário.
-- [ ] cada wheel instala e roda isoladamente.
-- [ ] metadata publicada não contém paths locais.
-- [ ] versões dos cinco pacotes estão em lockstep.
-- [ ] sdist e wheels passam twine check.
-
-### Qualidade e entrega
-
-- [ ] Ruff, Pyright e todos os testes passam.
-- [ ] cobertura total e dos módulos críticos atende aos thresholds.
-- [ ] lane mínima e lane locked passam.
-- [ ] notebook oficial roda a partir dos wheels.
-- [ ] pip-audit não possui vulnerabilidade conhecida sem waiver documentado.
-- [ ] TestPyPI smoke passa com o mesmo artefato destinado ao PyPI.
-- [ ] README, package READMEs, docs e changelog refletem a API real.
-
-Nenhum item pode ser marcado por inspeção informal. Cada item deve apontar para teste, job, artefato ou revisão reproduzível.
-
----
-
-## 31. Decisões conscientemente adiadas
+## 29. Decisões conscientemente adiadas
 
 As decisões abaixo não estão indefinidas; estão explicitamente fora da versão 0.1:
 
@@ -1683,11 +1334,3 @@ As decisões abaixo não estão indefinidas; estão explicitamente fora da vers�
 | Serviço remoto | não construir | requisitos multiusuário, isolamento e operação surgirem de produto real |
 
 Até uma condição ser satisfeita e uma decisão versionada ser aprovada, a implementação DEVE seguir a decisão atual.
-
----
-
-## 32. Resultado arquitetural esperado
-
-O repositório final não é uma coleção de scripts legados nem uma plataforma distribuída. É um monorepo pequeno, com cinco distribuições pip coesas, um gerador exclusivamente de teste e contratos de artefato explícitos.
-
-O caminho feliz é simples para notebook; a complexidade necessária permanece encapsulada em preflight, streaming, memmap, checkpoints e verificações. As regras mais importantes são executáveis por tipos, schemas, testes e CI. Essa é a arquitetura suficiente para implementar e publicar o DAMICORE 0.1 com correção, robustez e boa experiência em Colab.

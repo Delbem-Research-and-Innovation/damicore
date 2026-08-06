@@ -14,7 +14,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Specification section 24.4: the 2 GiB resource budget is proven at the tag commit, before
+  # anything irreversible is published. The object sweep is left out because it asserts no
+  # threshold, so it would cost minutes here without being able to fail.
+  benchmark:
+    uses: ./.github/workflows/benchmark.yml
+    with:
+      select: large
+
   release:
+    needs: benchmark
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: release
