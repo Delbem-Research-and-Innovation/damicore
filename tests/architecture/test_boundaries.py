@@ -11,6 +11,7 @@ import damicore_normalizer
 import damicore_tree_builder
 import pytest
 import tomllib
+from damicore.api import VERSION
 
 pytestmark = pytest.mark.contract
 
@@ -220,10 +221,17 @@ def test_third_party_runtime_dependencies_are_exact() -> None:
 
 
 def test_public_packages_declare_one_lockstep_version() -> None:
-    """Specification section 26: the five published distributions share one version."""
+    """Specification section 26: the five published distributions share one version.
+
+    The version is restated a sixth time in code: `damicore.api.VERSION` is the value `run()`
+    stamps into every manifest as `damicore_version`, which section 18.5 makes mandatory run
+    provenance. Asserting it here rather than in a test of its own keeps one check total over
+    every statement of the released version, so a release bump cannot leave one behind.
+    """
     versions = {package: _version(package) for package in sorted(PUBLIC)}
     assert len(set(versions.values())) == 1, versions
     assert re.fullmatch(r"\d+\.\d+\.\d+", versions["damicore"]), versions["damicore"]
+    assert VERSION == versions["damicore"], (VERSION, versions["damicore"])
 
 
 def test_orchestrator_pins_every_stage_within_the_lockstep_minor() -> None:
@@ -347,3 +355,50 @@ def test_type_check_configuration_covers_every_workspace_package() -> None:
             if (directory / area).is_dir():
                 relative = f"packages/{directory.name}/{area}"
                 assert relative in entries, relative
+
+
+def test_package_tool_configuration_does_not_drift() -> None:
+    """Every workspace member configures Ruff and pytest identically, bar the coverage target.
+
+    `packages/package.mk` exists because "Six copies had already drifted into two variants
+    differing only by stray indentation". The same six copies live on in `pyproject.toml`,
+    where nothing compares them: a rule added to one package's `select`, a line length raised
+    in one `[tool.ruff]`, or a floor lowered in one `addopts` stays invisible until someone
+    diffs the files by hand.
+
+    The coverage target is the one value that must differ, so it is normalised away rather
+    than restated. A literal template here would make this test a seventh copy of the flag
+    list it exists to protect, which is the defect, not the fix.
+    """
+    members = sorted(
+        directory.name
+        for directory in (ROOT / "packages").iterdir()
+        if (directory / "pyproject.toml").is_file()
+    )
+    # Guards the discovery: an empty or truncated scan would make every assertion below
+    # vacuous. Derived from PUBLIC rather than a literal count, so adding a package is one
+    # edit, not two.
+    assert set(members) >= PUBLIC, members
+
+    ruff: dict[str, object] = {}
+    pytest_options: dict[str, dict[str, object]] = {}
+    for member in members:
+        with (ROOT / "packages" / member / "pyproject.toml").open("rb") as stream:
+            tool = tomllib.load(stream)["tool"]
+        options: dict[str, object] = dict(tool["pytest"]["ini_options"])
+        addopts = str(options["addopts"])
+        # Checked before normalising: otherwise a package measuring another package's
+        # coverage would be erased by the substitution instead of caught by it.
+        assert re.findall(r"--cov=(\S+)", addopts) == [member], (member, addopts)
+        options["addopts"] = addopts.replace(f"--cov={member}", "--cov=<member>")
+        ruff[member] = tool["ruff"]
+        pytest_options[member] = options
+
+    reference = members[0]
+    for member in members[1:]:
+        assert ruff[member] == ruff[reference], (member, ruff[member], ruff[reference])
+        assert pytest_options[member] == pytest_options[reference], (
+            member,
+            pytest_options[member],
+            pytest_options[reference],
+        )

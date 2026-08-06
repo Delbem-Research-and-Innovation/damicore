@@ -15,6 +15,12 @@ from damicore.errors import (
     ResourceLimitError,
 )
 
+# Specification section 20 exposes four of the five resource limits as flags. Their values are
+# read from the model rather than restated here: ResourceLimits owns them, so raising a limit
+# there cannot leave the CLI clamped at the old one while `damicore.run()` honours the new one.
+# The model is frozen, so one shared instance is safe to read from.
+_DEFAULT_LIMITS = ResourceLimits()
+
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="damicore")
@@ -26,10 +32,16 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--delimiter", default=",")
         command.add_argument("--encoding", default="utf-8")
         command.add_argument("--workers", type=int)
-        command.add_argument("--max-objects", type=int, default=1_000)
-        command.add_argument("--max-pairs", type=int, default=500_000)
-        command.add_argument("--max-matrix-bytes", type=int, default=536_870_912)
-        command.add_argument("--max-working-memory-bytes", type=int, default=536_870_912)
+        command.add_argument("--max-objects", type=int, default=_DEFAULT_LIMITS.max_objects)
+        command.add_argument("--max-pairs", type=int, default=_DEFAULT_LIMITS.max_pairs)
+        command.add_argument(
+            "--max-matrix-bytes", type=int, default=_DEFAULT_LIMITS.max_matrix_bytes
+        )
+        command.add_argument(
+            "--max-working-memory-bytes",
+            type=int,
+            default=_DEFAULT_LIMITS.max_working_memory_bytes,
+        )
         command.add_argument("--keep-normalized", action="store_true")
         command.add_argument("--save-diagnostics", action="store_true")
     estimate_parser = commands.choices["estimate"]
