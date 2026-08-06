@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 60
     environment: release
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/uv-workspace
@@ -56,7 +56,7 @@ jobs:
       - run: uv run twine check dist/*
 
       - name: Publish exact artifacts to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1.13.0
+        uses: pypa/gh-action-pypi-publish@release/v1.14
         with:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: dist
@@ -82,12 +82,12 @@ jobs:
 
       # The same artifacts built above; nothing is rebuilt between the two indexes.
       - name: Publish the same artifacts to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1.13.0
+        uses: pypa/gh-action-pypi-publish@release/v1.14
         with:
           packages-dir: dist
           attestations: false
 
-      - uses: softprops/action-gh-release@v2.3.2
+      - uses: softprops/action-gh-release@v3.0.2
         with:
           body_path: CHANGELOG.md
           files: |
