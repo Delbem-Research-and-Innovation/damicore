@@ -1,9 +1,8 @@
 # DAMICORE — Especificação Final de Arquitetura e Implementação
 
 **Repositório:** Delbem-Research-and-Innovation/damicore  
-**Status:** aprovado para implementação  
-**Versão desta especificação:** 1.0  
-**Data de referência:** 2026-08-03  
+**Status:** implementado; contrato normativo da versão 0.1  
+**Versão desta especificação:** 1.1  
 **Primeira versão de produto:** 0.1.0
 
 ---
@@ -1458,6 +1457,8 @@ Disparo por tag vX.Y.Z. Ordem:
 
 Tokens PyPI persistentes NÃO DEVEM ser armazenados. Artefatos publicados devem ser exatamente os aprovados pelo job de build, sem rebuild entre TestPyPI e PyPI.
 
+O commit da tag é a definição de pronto da versão. Nenhum critério desta especificação é dado por cumprido por inspeção informal: o que reprova qualquer lane de 24.4, 25.1, 25.2 ou deste job não é publicado.
+
 ---
 
 ## 26. Versionamento e compatibilidade
@@ -1489,107 +1490,7 @@ Cada evento inclui run_id, stage e métricas escalares. Conteúdo do CSV e dos o
 
 ---
 
-## 28. Plano de implementação com gates
-
-### 28.1 Migração do estado atual
-
-As implementações existentes são substituídas, não encapsuladas por compatibilidade fictícia:
-
-| Área atual | Ação obrigatória |
-|---|---|
-| normalizer com composite_keys, key_columns inefetivo e CSV fixo em ponto e vírgula/Latin-1 | remover essa semântica e implementar exclusivamente columns/rows e o contrato da seção 10 |
-| distance somente gzip nível 9, float32, clamp e releitura integral | substituir por zlib padrão, float64, fórmula sem clamp, chunks, cache, memmap e shards |
-| export de matriz dependente de filename/diretório | substituir por paths pathlib validados e artefatos canônicos |
-| tree-builder já funcional | preservar fixtures válidas, adicionar contratos, memmap, tie-break, tree.json e Newick sem raiz espúria :0 |
-| clusterizer placeholder | implementar integralmente a seção 16 |
-| orquestrador termina na árvore e retorna outputs heterogêneos | substituir pelo pipeline, resultado e estados desta especificação |
-| scripts auxiliares do legado | não portar, salvo código mínimo necessário aos quatro algoritmos aprovados |
-
-Como a API 0.1 ainda será o primeiro contrato público completo, não se mantém compatibilidade com comportamentos acidentais atuais. Testes que codifiquem os comportamentos removidos devem ser substituídos por testes normativos, não adaptados para preservar defeitos.
-
-### Fase 1 — Base e contratos
-
-Entregas:
-
-- reestruturar workspace e pyprojects;
-- modelos Pydantic, exceções e schemas;
-- fixtures de contrato;
-- teste de direção de imports;
-- CI de lint, tipos e build básico.
-
-Gate: todos os cinco wheels constroem, instalam e expõem apenas APIs aprovadas.
-
-### Fase 2 — Normalizer e preflight
-
-Entregas:
-
-- contrato CSV;
-- normalização columns/rows em chunks;
-- manifesto, hashes, estimativa e limites;
-- testes de determinismo e memória.
-
-Gate: dois chunk sizes produzem artefatos idênticos e rows inviável falha antes de criar objetos.
-
-### Fase 3 — Distance
-
-Entregas:
-
-- zlib/gzip incremental;
-- cache C(x), shards, ProcessPool e memmap;
-- checkpoint/resume;
-- validação final e diagnósticos opcionais.
-
-Gate: serial/paralelo/retomado são bit a bit iguais e nenhuma concatenação é materializada.
-
-### Fase 4 — Tree builder
-
-Entregas:
-
-- Neighbor Joining determinístico;
-- workspace memmap com slots reutilizados;
-- tree.json/Newick;
-- fixtures matemáticas e validações.
-
-Gate: topologia, comprimentos e folhas passam fixtures; memória RAM não cresce como uma segunda matriz.
-
-### Fase 5 — Clusterizer
-
-Entregas:
-
-- conversão não enraizada;
-- peso, shift e FastGreedy;
-- membership e clusters determinísticos;
-- corte automático e k.
-
-Gate: cada folha pertence exatamente a um cluster e runs repetidos são idênticos.
-
-### Fase 6 — Orquestrador e notebook
-
-Entregas:
-
-- estimate, run, load_result e DamicoreResult;
-- estado, receipts, reuse, resume e progresso;
-- CLI;
-- quickstart e notebook Colab executável.
-
-Gate: wheel damicore isolado executa e2e columns/rows e notebook sem checkout, apt ou sys.path.
-
-### Fase 7 — Hardening e release
-
-Entregas:
-
-- stress de 2 GiB;
-- auditoria de dependências;
-- documentação final sincronizada;
-- TestPyPI e release candidate.
-
-Gate: todos os critérios da seção 30 estão comprovados no commit da tag.
-
-Uma fase não deve começar a integrar ao branch principal sem o gate anterior. Trabalho paralelo é permitido em branches, mas os contratos da Fase 1 são a autoridade comum.
-
----
-
-## 29. Rastreabilidade de decisões
+## 28. Rastreabilidade de decisões
 
 | Objetivo | Decisão | Enforcement | Evidência |
 |---|---|---|---|
@@ -1606,72 +1507,7 @@ Uma fase não deve começar a integrar ao branch principal sem o gate anterior. 
 
 ---
 
-## 30. Definition of Done do repositório
-
-A versão 0.1 só está concluída quando todos os itens forem verdadeiros:
-
-### Produto e API
-
-- [ ] pip install damicore funciona em Python 3.11–3.14.
-- [ ] estimate, run e load_result obedecem às assinaturas normativas.
-- [ ] columns e rows funcionam a partir de caminho CSV.
-- [ ] DamicoreResult entrega todos os campos e limites de materialização.
-- [ ] CLI é apenas adaptador da API.
-
-### Correção
-
-- [ ] serialização canônica é determinística.
-- [ ] NCD usa a fórmula exata e não aplica clamp.
-- [ ] matriz é float64, simétrica, finita e diagonal zero.
-- [ ] Neighbor Joining passa fixtures matemáticas e tie-break determinístico.
-- [ ] árvore tem exatamente todas as folhas.
-- [ ] FastGreedy usa todos os nós e retorna apenas folhas.
-- [ ] membership é completa, exclusiva e determinística.
-
-### Escala e recuperação
-
-- [ ] nenhum estágio carrega o CSV inteiro em RAM.
-- [ ] concatenação xy nunca é materializada.
-- [ ] matriz e workspace da árvore usam memmap.
-- [ ] preflight bloqueia contagens, pares, matriz ou disco acima dos limites.
-- [ ] rows inviável falha antes de criar arquivos por linha.
-- [ ] shards incompletos não são reutilizados.
-- [ ] execução retomada é idêntica à limpa.
-- [ ] benchmark de 2 GiB atende o limite de RSS.
-
-### Artefatos e operação
-
-- [ ] schemas, hashes, paths e estados são validados.
-- [ ] completed só é escrito depois da verificação cruzada.
-- [ ] diretório incompatível nunca é apagado ou sobrescrito.
-- [ ] logs não contêm dados de células.
-- [ ] relatório permite reconstruir configuração e versões.
-- [ ] load_result detecta corrupção.
-
-### Modularidade e distribuição
-
-- [ ] pacotes de estágio não se importam.
-- [ ] synthetic_data não entra em wheel runtime nem docs do usuário.
-- [ ] cada wheel instala e roda isoladamente.
-- [ ] metadata publicada não contém paths locais.
-- [ ] versões dos cinco pacotes estão em lockstep.
-- [ ] sdist e wheels passam twine check.
-
-### Qualidade e entrega
-
-- [ ] Ruff, Pyright e todos os testes passam.
-- [ ] cobertura total e dos módulos críticos atende aos thresholds.
-- [ ] lane mínima e lane locked passam.
-- [ ] notebook oficial roda a partir dos wheels.
-- [ ] pip-audit não possui vulnerabilidade conhecida sem waiver documentado.
-- [ ] TestPyPI smoke passa com o mesmo artefato destinado ao PyPI.
-- [ ] README, package READMEs, docs e changelog refletem a API real.
-
-Nenhum item pode ser marcado por inspeção informal. Cada item deve apontar para teste, job, artefato ou revisão reproduzível.
-
----
-
-## 31. Decisões conscientemente adiadas
+## 29. Decisões conscientemente adiadas
 
 As decisões abaixo não estão indefinidas; estão explicitamente fora da versão 0.1:
 
@@ -1687,11 +1523,3 @@ As decisões abaixo não estão indefinidas; estão explicitamente fora da vers�
 | Serviço remoto | não construir | requisitos multiusuário, isolamento e operação surgirem de produto real |
 
 Até uma condição ser satisfeita e uma decisão versionada ser aprovada, a implementação DEVE seguir a decisão atual.
-
----
-
-## 32. Resultado arquitetural esperado
-
-O repositório final não é uma coleção de scripts legados nem uma plataforma distribuída. É um monorepo pequeno, com cinco distribuições pip coesas, um gerador exclusivamente de teste e contratos de artefato explícitos.
-
-O caminho feliz é simples para notebook; a complexidade necessária permanece encapsulada em preflight, streaming, memmap, checkpoints e verificações. As regras mais importantes são executáveis por tipos, schemas, testes e CI. Essa é a arquitetura suficiente para implementar e publicar o DAMICORE 0.1 com correção, robustez e boa experiência em Colab.
