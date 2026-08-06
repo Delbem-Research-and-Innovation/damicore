@@ -67,11 +67,13 @@ def main() -> None:
     parser.add_argument("--target-bytes", type=int, default=2_147_483_648)
     # Specification section 24.4 defines two benchmarks with different costs: the large
     # normalization measurement needs a multi-gigabyte working set, while the object sweep is
-    # minutes of CPU. One axis rather than two skip flags, so "neither" cannot be requested.
+    # minutes of CPU. Exactly one per process, and required, so that neither "neither" nor
+    # "both" can be requested: ru_maxrss is a whole-process high-water mark, so a second
+    # measurement in the same process would report the first one's peak as its own.
     parser.add_argument(
         "--select",
-        choices=("large", "sweep", "both"),
-        default="both",
+        choices=("large", "sweep"),
+        required=True,
         help="which of the two specified benchmarks to run",
     )
     parser.add_argument(
@@ -93,8 +95,8 @@ def main() -> None:
         help="also write the measurements as JSON to this path, for run-over-run comparison",
     )
     arguments = parser.parse_args()
-    run_large: bool = arguments.select in ("large", "both")
-    run_sweep: bool = arguments.select in ("sweep", "both")
+    run_large: bool = arguments.select == "large"
+    run_sweep: bool = arguments.select == "sweep"
     if run_sweep and sorted(arguments.objects) != sorted(OBJECT_COUNTS):
         print(
             f"note: sweeping {sorted(arguments.objects)} instead of the "

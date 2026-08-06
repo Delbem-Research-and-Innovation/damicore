@@ -10,8 +10,8 @@ on:
       select:
         description: which of the two specified measurements to run
         type: choice
-        options: [large, sweep, both]
-        default: both
+        options: [sweep, large]
+        default: sweep
   workflow_call:
     inputs:
       select:

@@ -13,10 +13,12 @@ Peak RSS comes from `ru_maxrss`, a high-water mark for the whole process. The no
 figure therefore covers preflight too. That direction is deliberate for a budget: it can raise
 a false alarm, never hide an overrun.
 
-`--select` chooses which of the two measurements to run, because they cost very differently:
-`large` needs multiple gigabytes of disk, `sweep` needs minutes of CPU, and `both` is the
-default. `release.yml` runs `large` at the tag commit, where the RSS budget gates publication;
-`benchmark.yml` is dispatchable for either.
+`--select` is required and takes exactly one measurement, never both. They cost very
+differently — `large` needs multiple gigabytes of disk, `sweep` needs minutes of CPU — but the
+reason one process runs one of them is the RSS reading: `ru_maxrss` is a whole-process
+high-water mark, so a second measurement would report the first one's peak as its own.
+`release.yml` runs `large` at the tag commit, where the RSS budget gates publication;
+`benchmark.yml` dispatches either one.
 
 The algorithm benchmark sweeps object counts 100, 250, 500, and 1,000, recording time, disk,
 peak RSS, and pairs per second for each. Those counts are the default because the
