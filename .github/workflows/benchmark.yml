@@ -28,7 +28,7 @@ jobs:
     # Joining is cubic. Neither cost belongs on a pull request lane.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/uv-workspace
@@ -46,7 +46,7 @@ jobs:
       # before the first write reports the crash alone.
       - name: Publish the measurements
         if: always()
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: benchmark-measurements-${{ inputs.select }}
           path: /tmp/damicore-measurements/*.json
