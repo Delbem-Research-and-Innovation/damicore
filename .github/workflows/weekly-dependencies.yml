@@ -39,13 +39,29 @@ jobs:
         run: >
           uv run python benchmarks/benchmark_large_csv.py
           --directory /tmp/damicore-benchmark --rows 100 --select sweep
+          --output /tmp/damicore-measurements/sweep.json
 
-      # Writes a 2 GiB CSV and asserts the 1.5 GiB peak-RSS budget for normalization. Kept out
-      # of every pull request lane: it is the one check that needs a multi-gigabyte working set.
+      # Writes a 2 GiB CSV, normalizes it, and asserts the 1.5 GiB peak-RSS budget. Kept out of
+      # every pull request lane: it is the one check that needs a multi-gigabyte working set.
       - name: Benchmark normalization of a 2 GiB CSV
         run: >
           uv run python benchmarks/benchmark_large_csv.py
           --directory /tmp/damicore-stress --select large
+          --output /tmp/damicore-measurements/large.json
+
+      # Specification section 24.4 alerts on a regression against the median of the last three
+      # runs on the same runner, which requires the numbers to outlive the job that produced
+      # them. Uploaded even on failure, because a run that broke the budget is exactly the one
+      # worth reading; `warn` rather than `error` so a crash before the first write reports the
+      # crash alone instead of adding a second, misleading failure.
+      - name: Publish the benchmark measurements
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: benchmark-measurements
+          path: /tmp/damicore-measurements/*.json
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: Report the failure on the tracking issue
         if: failure()
