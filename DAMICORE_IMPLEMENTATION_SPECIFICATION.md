@@ -199,11 +199,12 @@ damicore/
 ├── DAMICORE_IMPLEMENTATION_SPECIFICATION.md
 ├── .python-version
 ├── .github/
+│   ├── dependabot.yml
 │   └── workflows/
 │       ├── ci.yml
 │       ├── build.yml
 │       ├── release.yml
-│       └── weekly-dependencies.yml
+│       └── benchmark.yml
 ├── docs/
 │   ├── quickstart.md
 │   ├── csv-contract.md
@@ -1390,16 +1391,18 @@ O CI constrói wheels, cria ambiente limpo, instala o wheel damicore, executa no
 
 ### 24.4 Stress e desempenho
 
-Benchmark manual/semanal obrigatório:
+Dois benchmarks obrigatórios, ambos executados por benchmark.yml. O primeiro:
 
 - CSV sintético de 2 GiB, 64 colunas, split=columns;
 - execução de normalização em runner Linux com 8 GiB RAM;
 - pico RSS durante normalização <=1,5 GiB;
 - nenhuma leitura única maior que csv_chunk_rows;
 - matriz aberta por memmap e to_pandas bloqueado conforme limite;
-- execução pode interromper após distância para evitar custo cúbico no benchmark de memória.
+- execução DEVE interromper após a normalização, que é a última etapa coberta pelo teto.
 
-Um segundo benchmark mede NCD e Neighbor Joining para n=100, 250, 500 e 1.000 e registra tempo, disco, RSS e pares/segundo. Não há threshold de tempo portável na versão 0.1; regressão acima de 25% contra a mediana dos três últimos runs no mesmo runner gera alerta, não bloqueio automático.
+O segundo mede NCD e Neighbor Joining para n=100, 250, 500 e 1.000 e registra tempo, disco, RSS e pares/segundo.
+
+O benchmark de 2 GiB é gate de release: release.yml o executa no commit da tag e o estouro do teto reprova a publicação. O segundo não tem threshold de tempo portável na versão 0.1 e roda por workflow_dispatch; regressão acima de 25% contra a mediana dos três últimos runs no mesmo runner gera alerta, não bloqueio automático. Ambos publicam as medições como artefato do run, que é a única série disponível para essa comparação, e as escrevem antes de reprovar, para que os números da falha sobrevivam.
 
 ### 24.5 Cobertura
 
@@ -1433,13 +1436,14 @@ Jobs:
 - instalar apenas damicore e executar e2e;
 - construir novamente e comparar conteúdo lógico do wheel, ignorando metadados ZIP inevitáveis.
 
-### 25.3 weekly-dependencies.yml
+### 25.3 Atualização de dependências
 
-- resolver versões mais novas dentro das faixas;
-- executar suíte completa;
-- pip-audit;
-- benchmark pequeno;
-- abrir issue em falha, sem atualizar lock automaticamente.
+Não existe lane agendada. As atualizações chegam pelo Dependabot, configurado em .github/dependabot.yml para os ecossistemas uv e github-actions:
+
+- alertas e correções de segurança são disparados pela publicação do advisory, não por um intervalo;
+- cada atualização chega como pull request e passa pelos mesmos gates bloqueantes de 25.1 e 25.2, incluindo pip-audit, de modo que a falha é atribuída a um bump específico;
+- o lock NÃO DEVE ser atualizado automaticamente no branch principal; o merge é decisão humana;
+- as faixas declaradas nos pacotes publicados são contrato da seção 8.2. Um pull request que as altere é reprovado pelo teste de arquitetura, não mergeado.
 
 ### 25.4 release.yml
 

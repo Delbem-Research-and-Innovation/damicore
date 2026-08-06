@@ -1,0 +1,26 @@
+version: 2
+
+updates:
+  # Specification section 25.3. Security advisories are delivered when they are published
+  # rather than on this interval, so the schedule only paces routine version bumps.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # One pull request for the routine floor-raising, so the queue stays readable, and a
+    # separate one per major, where the whole point is to review the break on its own.
+    groups:
+      runtime-and-dev:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # Nothing else updates the pinned action SHAs and tags, so without this they drift until
+  # a deprecation breaks a lane.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

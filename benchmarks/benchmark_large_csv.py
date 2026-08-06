@@ -125,8 +125,8 @@ def main() -> None:
         }
         # The budgeted stage. Preflight scans the CSV without writing a single object file, so
         # measuring it alone leaves the stage the specification actually names unmeasured.
-        # Stopping after normalization is earlier than the cut point section 24.4 permits, and
-        # it is still the last stage the 1.5 GiB budget covers.
+        # Section 24.4 stops here: normalization is the last stage the 1.5 GiB budget covers,
+        # and going further would only add the cubic cost this measurement does not need.
         started = time.monotonic()
         normalization = normalize_csv(
             large_path,

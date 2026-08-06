@@ -1,0 +1,54 @@
+name: Benchmark
+
+# Specification section 24.4. Called by release.yml to prove the resource budget at the tag
+# commit, and dispatchable on demand to investigate a suspected regression. It is deliberately
+# not scheduled: the 2 GiB measurement is an assertion that belongs on a gate, and the object
+# sweep has no portable threshold, so a periodic run would only produce numbers nobody reads.
+on:
+  workflow_dispatch:
+    inputs:
+      select:
+        description: which of the two specified measurements to run
+        type: choice
+        options: [large, sweep, both]
+        default: both
+  workflow_call:
+    inputs:
+      select:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    # The 2 GiB measurement writes and reads a multi-gigabyte working set, and Neighbor
+    # Joining is cubic. Neither cost belongs on a pull request lane.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/uv-workspace
+
+      - name: Measure
+        run: >
+          uv run python benchmarks/benchmark_large_csv.py
+          --directory /tmp/damicore-benchmark --rows 100
+          --select ${{ inputs.select }}
+          --output /tmp/damicore-measurements/${{ inputs.select }}.json
+
+      # The 25% regression rule compares against earlier runs, which requires the numbers to
+      # outlive the job that produced them. Uploaded even on failure, because a run that broke
+      # the RSS budget is exactly the one worth reading; `warn` rather than `error` so a crash
+      # before the first write reports the crash alone.
+      - name: Publish the measurements
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: benchmark-measurements-${{ inputs.select }}
+          path: /tmp/damicore-measurements/*.json
+          if-no-files-found: warn
+          retention-days: 90
