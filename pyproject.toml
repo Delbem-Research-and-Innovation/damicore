@@ -13,7 +13,7 @@ dev = [
     "pytest>=8,<10",
     "pytest-cov>=6,<8",
     "ruff>=0.15,<0.17",
-    "twine>=6,<7",
+    "twine>=7.0.0,<8",
 ]
 
 [tool.uv.sources]
