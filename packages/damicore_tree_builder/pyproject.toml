@@ -21,7 +21,7 @@ dependencies = ["numpy>=1.26,<3", "pydantic>=2.10,<3"]
 package = true
 
 [build-system]
-requires = ["hatchling>=1.27,<2"]
+requires = ["hatchling>=1.31.0,<2"]
 build-backend = "hatchling.build"
 
 [tool.ruff]
