@@ -27,6 +27,8 @@ Durante a implementação, a ordem de autoridade é:
 
 Qualquer divergência entre essas fontes é um defeito. O nível inferior NÃO DEVE redefinir silenciosamente o nível superior. Depois do lançamento, mudanças de contrato exigem atualização conjunta desta especificação, dos modelos, dos testes e da documentação pública.
 
+Este documento não duplica o que o repositório já enuncia de forma executável. Onde ele delega uma listagem — assinaturas, campos de modelo, árvore de arquivos — o código é a fonte daquela listagem e um teste a fixa; a regra sobre a listagem continua sendo desta especificação. Delegar não é rebaixar: uma listagem copiada aqui seria uma segunda verdade livre para divergir em silêncio.
+
 ---
 
 ## 2. Definição do produto
@@ -189,114 +191,15 @@ Essa direção DEVE ser fiscalizada por teste AST no CI, que falha se um pacote 
 
 ## 7. Estrutura obrigatória do repositório
 
-~~~text
-damicore/
-├── pyproject.toml
-├── uv.lock
-├── README.md
-├── CHANGELOG.md
-├── DAMICORE_IMPLEMENTATION_SPECIFICATION.md
-├── .python-version
-├── .github/
-│   ├── dependabot.yml
-│   └── workflows/
-│       ├── ci.yml
-│       ├── build.yml
-│       ├── release.yml
-│       └── benchmark.yml
-├── docs/
-│   ├── quickstart.md
-│   ├── csv-contract.md
-│   ├── artifacts.md
-│   ├── scalability.md
-│   └── decisions/
-│       ├── 0001-package-boundaries.md
-│       ├── 0002-canonical-csv-serialization.md
-│       ├── 0003-memmap-and-resource-gates.md
-│       └── 0004-exact-local-algorithms.md
-├── notebooks/
-│   └── colab_quickstart.ipynb
-├── packages/
-│   ├── damicore_normalizer/
-│   │   ├── pyproject.toml
-│   │   ├── README.md
-│   │   ├── src/damicore_normalizer/
-│   │   │   ├── __init__.py
-│   │   │   ├── api.py
-│   │   │   ├── config.py
-│   │   │   ├── csv_reader.py
-│   │   │   ├── serializer.py
-│   │   │   ├── manifest.py
-│   │   │   └── errors.py
-│   │   └── tests/
-│   ├── damicore_distance/
-│   │   ├── pyproject.toml
-│   │   ├── README.md
-│   │   ├── src/damicore_distance/
-│   │   │   ├── __init__.py
-│   │   │   ├── api.py
-│   │   │   ├── config.py
-│   │   │   ├── compressor.py
-│   │   │   ├── ncd.py
-│   │   │   ├── shards.py
-│   │   │   ├── matrix.py
-│   │   │   └── errors.py
-│   │   └── tests/
-│   ├── damicore_tree_builder/
-│   │   ├── pyproject.toml
-│   │   ├── README.md
-│   │   ├── src/damicore_tree_builder/
-│   │   │   ├── __init__.py
-│   │   │   ├── api.py
-│   │   │   ├── config.py
-│   │   │   ├── models.py
-│   │   │   ├── neighbor_joining.py
-│   │   │   ├── newick.py
-│   │   │   ├── artifacts.py
-│   │   │   └── errors.py
-│   │   └── tests/
-│   ├── damicore_clusterizer/
-│   │   ├── pyproject.toml
-│   │   ├── README.md
-│   │   ├── src/damicore_clusterizer/
-│   │   │   ├── __init__.py
-│   │   │   ├── api.py
-│   │   │   ├── config.py
-│   │   │   ├── tree_graph.py
-│   │   │   ├── fastgreedy.py
-│   │   │   ├── artifacts.py
-│   │   │   └── errors.py
-│   │   └── tests/
-│   ├── damicore/
-│   │   ├── pyproject.toml
-│   │   ├── README.md
-│   │   ├── src/damicore/
-│   │   │   ├── __init__.py
-│   │   │   ├── api.py
-│   │   │   ├── cli.py
-│   │   │   ├── config.py
-│   │   │   ├── estimate.py
-│   │   │   ├── pipeline.py
-│   │   │   ├── result.py
-│   │   │   ├── manifest.py
-│   │   │   ├── progress.py
-│   │   │   └── errors.py
-│   │   └── tests/
-│   └── synthetic_data/
-│       ├── pyproject.toml
-│       ├── src/synthetic_data/
-│       │   ├── __init__.py
-│       │   └── generator.py
-│       └── tests/
-├── tests/
-│   ├── contracts/
-│   ├── e2e/
-│   ├── notebooks/
-│   └── architecture/
-└── benchmarks/
-    ├── README.md
-    └── benchmark_large_csv.py
-~~~
+O repositório é um workspace uv com packages/ na raiz, mais docs/, notebooks/, tests/ e benchmarks/. São normativos:
+
+- os cinco pacotes publicados e synthetic_data ocupam um diretório cada em packages/, com pyproject.toml, README.md, layout src e tests/ próprios;
+- o diretório do código de cada pacote tem exatamente o nome do seu módulo importável;
+- módulos são nomeados pelo conceito de domínio que possuem, um conceito por módulo;
+- tests/ na raiz guarda somente as suítes que atravessam pacotes: contracts, e2e, notebooks e architecture;
+- o pyproject raiz declara o workspace e não gera distribuição.
+
+A árvore concreta de arquivos NÃO É normativa. Ela é legível no próprio repositório, e fixá-la aqui apenas produz uma cópia que se desatualiza a cada módulo novo. Quais pacotes existem e quais podem ser publicados é decidido pelo teste de arquitetura e pela allowlist do Makefile.
 
 Todos os pacotes usam layout src. Os módulos internos NÃO DEVEM ser reexportados por acidente. Cada __init__.py DEVE declarar __all__ com a API pública descrita neste documento.
 
@@ -384,47 +287,7 @@ O pyproject raiz declara workspace members = ["packages/*"] e não gera distribu
 
 ### 9.1 Assinaturas
 
-~~~python
-from pathlib import Path
-from damicore import (
-    DamicoreResult,
-    ExecutionConfig,
-    ResourceEstimate,
-    ResourceLimits,
-)
-
-
-def estimate(
-    csv_path: str | Path,
-    *,
-    split: str = "columns",
-    delimiter: str = ",",
-    encoding: str = "utf-8",
-    keep_normalized: bool = False,
-    save_diagnostics: bool = False,
-    execution: ExecutionConfig | None = None,
-) -> ResourceEstimate: ...
-
-
-def run(
-    csv_path: str | Path,
-    *,
-    split: str = "columns",
-    delimiter: str = ",",
-    encoding: str = "utf-8",
-    compressor: str = "zlib",
-    compression_level: int = 6,
-    num_clusters: int | None = None,
-    output_dir: str | Path | None = None,
-    keep_normalized: bool = False,
-    save_diagnostics: bool = False,
-    progress: bool = True,
-    execution: ExecutionConfig | None = None,
-) -> DamicoreResult: ...
-
-
-def load_result(output_dir: str | Path) -> DamicoreResult: ...
-~~~
+damicore expõe exatamente estimate, run e load_result. As assinaturas vivem em damicore/api.py e os nomes públicos são fixados por teste de arquitetura; esta seção define o que uma assinatura não expressa.
 
 csv_path aceita somente arquivo regular local existente. URLs e objetos file-like são rejeitados. split aceita exatamente columns ou rows. delimiter DEVE ter um único caractere Unicode. encoding DEVE ser reconhecido por codecs.lookup e usa errors=strict. compressor aceita exatamente zlib ou gzip. compression_level aceita inteiro de 0 a 9.
 
@@ -465,59 +328,7 @@ Para aceitar um problema maior, o usuário precisa fornecer limites maiores expl
 
 ### 9.3 Resultado
 
-~~~python
-class DamicoreResult:
-    membership: pandas.DataFrame
-    clusters: dict[int, list[str]]
-    tree_newick: str
-    distance_matrix: DistanceMatrixView
-    report: RunReport
-    artifacts: ArtifactPaths
-
-    def save(self, output_dir: str | Path) -> ArtifactPaths: ...
-    def close(self) -> None: ...
-~~~
-
-~~~python
-class ArtifactPaths(BaseModel):
-    run_dir: Path
-    manifest: Path
-    report: Path
-    distance_matrix: Path
-    labels: Path
-    tree_json: Path
-    tree_newick: Path
-    membership: Path
-    clusters: Path
-    normalization_dir: Path | None
-    diagnostics_dir: Path | None
-
-
-class RunReport(BaseModel):
-    status: Literal["completed", "failed", "interrupted"]
-    failed_stage: str | None
-    object_count: int
-    pair_count: int
-    community_count: int | None
-    cluster_count: int | None
-    effective_workers: int
-    csv_chunk_rows: int
-    compression_chunk_bytes: int
-    pairs_per_shard: int
-    matrix_bytes: int
-    required_free_disk_bytes: int
-    peak_rss_bytes: int | None
-    ncd_min: float | None
-    ncd_max: float | None
-    ncd_out_of_range_count: int
-    negative_branch_count: int
-    branch_length_shift: float
-    modularity: float | None
-    timings_seconds: dict[str, float]
-    verification: dict[str, bool]
-    warnings: list[str]
-    error: dict[str, object] | None
-~~~
+DamicoreResult expõe membership, clusters, tree_newick, distance_matrix, report e artifacts, mais save e close. Os campos de RunReport e ArtifactPaths são o schema de report.json e dos paths que a CLI imprime; a lista exata é fixada por teste de arquitetura, e alterá-la é mudança de contrato.
 
 No DamicoreResult retornado por run ou load_result, report.status é sempre completed. Reports failed/interrupted existem no disco para diagnóstico e retomada, mas load_result os rejeita.
 
