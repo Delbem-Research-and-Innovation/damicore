@@ -197,6 +197,53 @@ def test_public_pyprojects_contain_no_workspace_paths_or_typer() -> None:
         assert "file://" not in text
 
 
+# PyPI freezes metadata per version: a missing key is not a fix, it is a version number. These
+# fields are also the only ones nothing else in the repository reads, so without this they are
+# unverified by construction. The assertions are about presence and shape, never the text of a
+# field, so ordinary editing stays free.
+REQUIRED_URLS = frozenset({"Homepage", "Repository", "Issues", "Changelog"})
+SHARED_CLASSIFIERS = frozenset(
+    {
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Science/Research",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python :: 3",
+        "Topic :: Scientific/Engineering :: Information Analysis",
+        "Typing :: Typed",
+    }
+)
+
+
+def _urls(package: str) -> dict[str, str]:
+    declared = _project(package).get("urls", {})
+    if not isinstance(declared, dict):
+        return {}
+    return {
+        str(key): str(value) for key, value in cast(dict[str, object], declared).items()
+    }
+
+
+@pytest.mark.parametrize("package", sorted(PUBLIC))
+def test_every_public_package_carries_navigable_pypi_metadata(package: str) -> None:
+    urls = _urls(package)
+    assert REQUIRED_URLS <= set(urls), package
+    # The project declares no routable mailbox, so Issues is the contact channel and every
+    # link has to actually resolve as one.
+    assert all(value.startswith("https://") for value in urls.values()), urls
+    assert SHARED_CLASSIFIERS <= set(_classifiers(package)), package
+    keywords = _project(package).get("keywords", [])
+    assert isinstance(keywords, list)
+    assert keywords, package
+
+
+def test_every_public_package_ships_the_typing_marker_it_advertises() -> None:
+    """`Typing :: Typed` is a claim; py.typed is what makes it true. Asserting the classifier
+    without the file would let the distributions advertise types they do not deliver."""
+    for package in sorted(PUBLIC):
+        marker = ROOT / "packages" / package / "src" / package / "py.typed"
+        assert marker.is_file(), package
+
+
 def test_third_party_runtime_dependencies_are_exact() -> None:
     """Specification section 8.2 closes the runtime dependency set and its ranges."""
     expected = {
