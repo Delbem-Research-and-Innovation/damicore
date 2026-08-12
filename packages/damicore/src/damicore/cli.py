@@ -207,7 +207,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = preview.model_dump(mode="json")
             if arguments.json:
-                print(json.dumps(payload, sort_keys=True))
+                # flush=True forces the pipe write to happen here, inside the handler that
+                # owns the 141 contract. Left buffered, a closed pipe surfaces the error at
+                # interpreter shutdown instead, which exits 120 — whether that happens then
+                # depends on the ambient buffering mode (a TTY, PYTHONUNBUFFERED), not on us.
+                print(json.dumps(payload, sort_keys=True), flush=True)
             else:
                 print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
         else:

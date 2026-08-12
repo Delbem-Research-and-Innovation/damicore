@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/uv-workspace
@@ -87,7 +87,7 @@ jobs:
           uv run python .github/scripts/verify_dist.py \
             --dist dist --rebuilt /tmp/rebuilt -- $PUBLIC_PACKAGES
 
-      - uses: actions/upload-artifact@v4.6.2
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: distributions
           path: dist/*

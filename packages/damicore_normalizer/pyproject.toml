@@ -34,7 +34,7 @@ Documentation = "https://github.com/Delbem-Research-and-Innovation/damicore/blob
 Changelog = "https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/CHANGELOG.md"
 
 [build-system]
-requires = ["hatchling>=1.27,<2"]
+requires = ["hatchling>=1.31.0,<2"]
 build-backend = "hatchling.build"
 
 # Workspace-only files are excluded on purpose: each package's Makefile only includes
