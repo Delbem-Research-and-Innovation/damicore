@@ -15,9 +15,9 @@ nothing. Pushing the tag by hand still works and runs the same pipeline.
 To release: set the five `pyproject.toml` versions, add the `## X.Y.Z`
 changelog section, run `uv sync --all-packages --group dev` so `uv.lock` records
 the new versions (every CI job installs with `--locked` and fails on a stale
-lock), and merge. For a fully automatic flow the `release` environment must have
-no required reviewers; adding reviewers turns each publish into one approval
-click instead.
+lock), and merge. For a fully automatic flow the `release-<project>`
+environments must have no required reviewers; adding reviewers turns each
+publish into approval clicks instead.
 
 ## Gate chain (`.github/workflows/release.yml`)
 
@@ -37,25 +37,29 @@ click instead.
 
 Trusted Publishing "pending publisher" entries on both indexes, one per project
 name, all with owner `Delbem-Research-and-Innovation`, repository `damicore`,
-workflow `release.yml`, environment `release` — 10 entries in total:
+workflow `release.yml` — 10 entries in total. PyPI keeps pending publishers
+unique on (owner, repository, workflow, environment) regardless of project
+name, so each project needs its own environment, `release-<project>`:
 
-| Index | Project |
-|---|---|
-| pypi.org | damicore |
-| pypi.org | damicore-normalizer |
-| pypi.org | damicore-distance |
-| pypi.org | damicore-tree-builder |
-| pypi.org | damicore-clusterizer |
-| test.pypi.org | damicore |
-| test.pypi.org | damicore-normalizer |
-| test.pypi.org | damicore-distance |
-| test.pypi.org | damicore-tree-builder |
-| test.pypi.org | damicore-clusterizer |
+| Index | Project | Environment |
+|---|---|---|
+| pypi.org | damicore | release-damicore |
+| pypi.org | damicore-normalizer | release-damicore-normalizer |
+| pypi.org | damicore-distance | release-damicore-distance |
+| pypi.org | damicore-tree-builder | release-damicore-tree-builder |
+| pypi.org | damicore-clusterizer | release-damicore-clusterizer |
+| test.pypi.org | damicore | release-damicore |
+| test.pypi.org | damicore-normalizer | release-damicore-normalizer |
+| test.pypi.org | damicore-distance | release-damicore-distance |
+| test.pypi.org | damicore-tree-builder | release-damicore-tree-builder |
+| test.pypi.org | damicore-clusterizer | release-damicore-clusterizer |
 
 Additionally:
 
-- Create the GitHub environment named `release`; add required reviewers to it for
-  a manual approval gate if desired.
+- The five `release-<project>` GitHub environments are created automatically the
+  first time the publish jobs reference them; pre-create them in Settings →
+  Environments only to attach required reviewers (each reviewed environment adds
+  one approval per index to every release).
 - The organization's actions policy must allow the pinned third-party actions:
   `pypa/gh-action-pypi-publish`, `softprops/action-gh-release`, `astral-sh/setup-uv`.
 - The repository must be public, or the metadata URLs baked into the wheels 404.
