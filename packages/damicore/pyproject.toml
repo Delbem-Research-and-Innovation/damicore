@@ -17,7 +17,7 @@ classifiers = [
 ]
 dependencies = [
     "damicore-normalizer>=0.1.0,<0.2.0",
-    "damicore-distance>=0.1.0,<0.2.0",
+    "damicore-distance[pandas]>=0.1.0,<0.2.0",
     "damicore-tree-builder>=0.1.0,<0.2.0",
     "damicore-clusterizer>=0.1.0,<0.2.0",
     "pandas>=2.2,<4",

@@ -1,4 +1,5 @@
 import json
+import sys
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -613,3 +614,26 @@ def test_a_typed_worker_error_passes_through_unchanged() -> None:
     with pytest.raises(DistanceError) as raised:
         list(results)
     assert raised.value is original
+
+
+# Setting a sys.modules entry to None makes `import pandas` raise ImportError, which is how
+# the absence of the optional extra is reproduced in an environment that has it installed.
+@pytest.mark.parametrize("method_name", ["head", "to_pandas"])
+def test_a_pandas_view_without_the_extra_names_the_extra_to_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method_name: str
+) -> None:
+    """Section 9.3 keeps both methods on the view while pandas stays optional, so their
+    failure has to be the package's own typed error rather than ModuleNotFoundError."""
+    path = tmp_path / "distance.npy"
+    np.save(path, np.zeros((2, 2), dtype=np.float64), allow_pickle=False)  # pyright: ignore[reportUnknownMemberType]
+    view = DistanceMatrixView(path, ["a", "b"])
+    monkeypatch.setitem(sys.modules, "pandas", None)
+    try:
+        with pytest.raises(DistanceError) as raised:
+            getattr(view, method_name)()
+        assert raised.value.code == "missing_dependency_error"
+        assert "damicore-distance[pandas]" in str(raised.value)
+        # The NumPy surface must keep working without the extra; only these two need it.
+        assert view.shape == (2, 2)
+    finally:
+        view.close()

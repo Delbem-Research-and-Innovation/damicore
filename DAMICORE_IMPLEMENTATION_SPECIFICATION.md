@@ -235,10 +235,10 @@ Distribuição por pacote:
 | Pacote | Dependências diretas |
 |---|---|
 | damicore-normalizer | pandas, pydantic |
-| damicore-distance | numpy, pydantic |
+| damicore-distance | numpy, pydantic; pandas como extra opcional `[pandas]` |
 | damicore-tree-builder | numpy, pydantic |
 | damicore-clusterizer | igraph, numpy, pydantic |
-| damicore | damicore-normalizer, damicore-distance, damicore-tree-builder, damicore-clusterizer, pandas, pydantic, tqdm |
+| damicore | damicore-normalizer, damicore-distance[pandas], damicore-tree-builder, damicore-clusterizer, pandas, pydantic, tqdm |
 
 damicore DEVE declarar cada pacote irmão como >=0.1.0,<0.2.0. Os pyproject publicados NÃO DEVEM conter referências workspace, paths locais ou sources do uv.
 
@@ -344,6 +344,8 @@ DistanceMatrixView DEVE oferecer:
 - indexação NumPy somente leitura;
 - head(n=5) retornando DataFrame n por n;
 - to_pandas(force=False).
+
+head e to_pandas são os únicos pontos do pacote que usam pandas, declarado como extra `[pandas]`. Quando o extra não está instalado, ambos DEVEM falhar com erro tipado nomeando o extra a instalar; o restante da view (shape, dtype, labels, path e indexação NumPy) permanece disponível sem ele. damicore depende de damicore-distance[pandas], então o pipeline agregado sempre os tem.
 
 to_pandas falha com MaterializationError quando os bytes da matriz excedem pandas_materialization_limit_bytes, salvo force=True. A mensagem DEVE informar tamanho estimado e sugerir head ou acesso por fatias.
 

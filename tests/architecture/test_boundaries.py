@@ -220,6 +220,42 @@ def test_third_party_runtime_dependencies_are_exact() -> None:
         assert third_party == dependencies, package
 
 
+def _optional_dependencies(package: str) -> dict[str, set[str]]:
+    declared = _project(package).get("optional-dependencies", {})
+    if not isinstance(declared, dict):
+        return {}
+    return {
+        str(extra): {str(entry) for entry in cast(list[object], entries)}
+        for extra, entries in cast(dict[str, object], declared).items()
+        if isinstance(entries, list)
+    }
+
+
+def test_optional_dependency_extras_are_exact() -> None:
+    """Section 8.2 closes the extras as well as the required set.
+
+    The check above reads only `[project.dependencies]`, so an extra is invisible to it: one
+    could be added, or silently widened, without any assertion noticing. damicore-distance's
+    pandas extra is what makes head() and to_pandas() optional, so its range is a contract.
+    """
+    expected: dict[str, dict[str, set[str]]] = {
+        "damicore_normalizer": {},
+        "damicore_distance": {"pandas": {"pandas>=2.2,<4"}},
+        "damicore_tree_builder": {},
+        "damicore_clusterizer": {},
+        "damicore": {},
+    }
+    for package, extras in expected.items():
+        assert _optional_dependencies(package) == extras, package
+
+
+def test_the_aggregate_requires_the_pandas_extra_of_the_distance_package() -> None:
+    """`pip install damicore` has to bring pandas with it: the documented quickstart calls
+    result.distance_matrix.head(). Depending on the bare distribution would leave that
+    example raising at runtime while every wheel still resolved and installed cleanly."""
+    assert "damicore-distance[pandas]>=0.1.0,<0.2.0" in _dependencies("damicore")
+
+
 def test_public_packages_declare_one_lockstep_version() -> None:
     """Specification section 26: the five published distributions share one version.
 
@@ -251,6 +287,9 @@ def test_orchestrator_pins_every_stage_within_the_lockstep_minor() -> None:
         if not dependency.startswith("damicore-"):
             continue
         name, _, specifier = dependency.partition(">=")
+        # An extra qualifies the requirement, not the distribution: damicore-distance[pandas]
+        # is still the damicore-distance release this pin has to bound.
+        name = name.partition("[")[0]
         floor, _, cap = specifier.partition(",")
         assert cap == ceiling, dependency
         assert _release(floor) <= _release(version), dependency

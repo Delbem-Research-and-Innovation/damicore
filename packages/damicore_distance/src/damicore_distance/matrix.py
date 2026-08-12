@@ -7,8 +7,19 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
+from damicore_distance.errors import DistanceError
+
 if TYPE_CHECKING:
     import pandas as pd
+
+# pandas backs only these two convenience views, so it is an extra rather than a dependency:
+# the rest of this package is NumPy, and a caller who installs it alone should not carry
+# pandas for two methods. The message is the single place that names the remedy.
+_PANDAS_REQUIRED = (
+    "pandas is required by this method and is not installed. Install it with "
+    "`pip install damicore-distance[pandas]`, or read the matrix through NumPy slicing "
+    "and shape, which need no extra."
+)
 
 
 class DistanceResult(BaseModel):
@@ -50,7 +61,10 @@ class DistanceMatrixView:
         return self._require_open()[key]
 
     def head(self, n: int = 5) -> pd.DataFrame:
-        import pandas as pd
+        try:
+            import pandas as pd
+        except ImportError as exc:
+            raise DistanceError(_PANDAS_REQUIRED, code="missing_dependency_error") from exc
 
         size = min(max(n, 0), len(self.labels))
         values = np.asarray(self._require_open()[:size, :size])
@@ -58,7 +72,10 @@ class DistanceMatrixView:
         return pd.DataFrame(values, index=labels, columns=labels)
 
     def to_pandas(self, force: bool = False) -> pd.DataFrame:
-        import pandas as pd
+        try:
+            import pandas as pd
+        except ImportError as exc:
+            raise DistanceError(_PANDAS_REQUIRED, code="missing_dependency_error") from exc
 
         matrix = self._require_open()
         if matrix.nbytes > self._limit and not force:

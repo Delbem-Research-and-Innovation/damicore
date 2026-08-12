@@ -4,9 +4,11 @@ Runs under the target interpreter of a clean virtual environment, so it may impo
 beyond the standard library and the installed ``damicore`` distributions. It never imports
 from the checkout: the only thing this file contributes is the check itself.
 
-``--package`` asserts a distribution installs alone and that its declared public surface
-resolves. The exact symbol list is not asserted here; that contract belongs to
-``tests/architecture``, and duplicating it would mean two owners for one rule.
+``--package`` asserts a distribution installs alone, that its declared public surface
+resolves, and that any behaviour a name lookup cannot see still holds under the dependencies
+that distribution actually declares. The exact symbol list is not asserted here; that
+contract belongs to ``tests/architecture``, and duplicating it would mean two owners for one
+rule.
 
 ``--pipeline`` asserts the aggregate distribution runs the required pipeline end to end
 from a CSV path and reloads the persisted run.
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import pathlib
 import sysconfig
 import tempfile
@@ -59,6 +62,59 @@ def check_public_surface(name: str) -> None:
     if missing:
         raise AssertionError(f"{name}.__all__ exports unresolvable names: {missing}")
     print(f"wheel-smoke: {name} exports {len(exported)} resolvable names")
+    check = _BEHAVIOUR_CHECKS.get(name)
+    if check is not None:
+        check()
+        print(
+            f"wheel-smoke: {name} public behaviour holds under its declared dependencies"
+        )
+
+
+def _distance_view_without_the_pandas_extra() -> None:
+    """A name resolving proves only that an attribute exists, never that calling it works.
+
+    `head` and `to_pandas` are the whole reason damicore-distance declares a pandas extra.
+    Installed without it, they must fail with the package's own error naming the extra, and
+    the NumPy surface beside them must keep working. Resolving `__all__` sees none of this: a
+    method whose first line raises ModuleNotFoundError passes that check untouched.
+    """
+    import numpy as np
+    from damicore_distance import DistanceError, DistanceMatrixView
+
+    directory = pathlib.Path(tempfile.mkdtemp())
+    path = directory / "distance.npy"
+    np.save(  # pyright: ignore[reportUnknownMemberType] - numpy ships save() untyped
+        path, np.zeros((3, 3), dtype=np.float64), allow_pickle=False
+    )
+    view = DistanceMatrixView(path, ["a", "b", "c"])
+    try:
+        assert view.shape == (3, 3), view.shape
+        assert view.dtype == np.float64, view.dtype
+        has_pandas = importlib.util.find_spec("pandas") is not None
+        for method in (view.head, view.to_pandas):
+            try:
+                method()
+            except DistanceError as error:
+                if has_pandas:
+                    raise AssertionError(
+                        f"{method.__name__} refused pandas work although pandas is installed"
+                    ) from error
+                if "damicore-distance[pandas]" not in str(error):
+                    raise AssertionError(
+                        f"{method.__name__} must name the extra to install, said: {error}"
+                    ) from error
+            else:
+                if not has_pandas:
+                    raise AssertionError(
+                        f"{method.__name__} materialised a frame without pandas installed"
+                    )
+    finally:
+        view.close()
+
+
+# Keyed by import name: a distribution appears here when its public surface has behaviour a
+# name lookup cannot see, which so far means an optional dependency.
+_BEHAVIOUR_CHECKS = {"damicore_distance": _distance_view_without_the_pandas_extra}
 
 
 def check_pipeline() -> None:
