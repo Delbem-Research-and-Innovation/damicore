@@ -26,6 +26,7 @@ dependencies = [
     "damicore-distance[pandas]>=0.1.0,<0.2.0",
     "damicore-tree-builder>=0.1.0,<0.2.0",
     "damicore-clusterizer>=0.1.0,<0.2.0",
+    "numpy>=1.26,<3",
     "pandas>=2.2,<4",
     "pydantic>=2.10,<3",
     "tqdm>=4.66,<5",

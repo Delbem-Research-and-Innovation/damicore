@@ -444,6 +444,8 @@ dependencies = [
     { name = "damicore-distance", extra = ["pandas"] },
     { name = "damicore-normalizer" },
     { name = "damicore-tree-builder" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pandas" },
     { name = "pydantic" },
     { name = "tqdm" },
@@ -455,6 +457,7 @@ requires-dist = [
     { name = "damicore-distance", extras = ["pandas"], editable = "packages/damicore_distance" },
     { name = "damicore-normalizer", editable = "packages/damicore_normalizer" },
     { name = "damicore-tree-builder", editable = "packages/damicore_tree_builder" },
+    { name = "numpy", specifier = ">=1.26,<3" },
     { name = "pandas", specifier = ">=2.2,<4" },
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "tqdm", specifier = ">=4.66,<5" },
@@ -466,15 +469,12 @@ version = "0.1.0"
 source = { editable = "packages/damicore_clusterizer" }
 dependencies = [
     { name = "igraph" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "igraph", specifier = ">=1.0,<1.1" },
-    { name = "numpy", specifier = ">=1.26,<3" },
     { name = "pydantic", specifier = ">=2.10,<3" },
 ]
 

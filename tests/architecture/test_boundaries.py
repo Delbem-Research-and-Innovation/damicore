@@ -25,7 +25,7 @@ STAGES = {
 PUBLIC = STAGES | {"damicore"}
 
 # A workspace member carrying this classifier is private test infrastructure and must never
-# be published (specification section 9.3).
+# be published.
 PRIVATE_CLASSIFIER = "Private :: Do Not Upload"
 
 
@@ -151,10 +151,9 @@ def test_public_exports_are_exact() -> None:
 
 
 def test_public_result_models_declare_the_specified_fields() -> None:
-    """Specification sections 9.3, 18.5 and 18.6 with section 26, which makes a schema part of
-    the public API. These two models are the schemas of report.json and of the paths the CLI
-    prints, so a field added or renamed here is a contract change and must be a specification
-    change first."""
+    """A published schema is part of the public API. These two models are the schemas of
+    report.json and of the paths the CLI prints, so a field added or renamed here is a
+    contract change and needs a version bump, not an edit to this list."""
     assert list(damicore.RunReport.model_fields) == [
         "status",
         "failed_stage",
@@ -256,17 +255,25 @@ def test_every_public_package_ships_the_typing_marker_it_advertises() -> None:
 
 
 def test_third_party_runtime_dependencies_are_exact() -> None:
-    """Specification section 8.2 closes the runtime dependency set and its ranges."""
+    """The runtime dependency set and its ranges are closed; this test is what closes them.
+
+    Each set is exactly what its distribution imports: a dependency reached only through
+    another package is not declared, and one that is imported directly is, even when a
+    sibling would have supplied it anyway. damicore imports numpy in api.py, so it declares
+    numpy rather than relying on the stage packages; damicore_clusterizer builds its graphs
+    through igraph alone, so it declares none.
+    """
     expected = {
         "damicore_normalizer": {"pandas>=2.2,<4", "pydantic>=2.10,<3"},
         "damicore_distance": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
         "damicore_tree_builder": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
-        "damicore_clusterizer": {
-            "igraph>=1.0,<1.1",
+        "damicore_clusterizer": {"igraph>=1.0,<1.1", "pydantic>=2.10,<3"},
+        "damicore": {
             "numpy>=1.26,<3",
+            "pandas>=2.2,<4",
             "pydantic>=2.10,<3",
+            "tqdm>=4.66,<5",
         },
-        "damicore": {"pandas>=2.2,<4", "pydantic>=2.10,<3", "tqdm>=4.66,<5"},
     }
     for package, dependencies in expected.items():
         third_party = {
@@ -289,7 +296,7 @@ def _optional_dependencies(package: str) -> dict[str, set[str]]:
 
 
 def test_optional_dependency_extras_are_exact() -> None:
-    """Section 8.2 closes the extras as well as the required set.
+    """The extras are closed as well as the required set.
 
     The check above reads only `[project.dependencies]`, so an extra is invisible to it: one
     could be added, or silently widened, without any assertion noticing. damicore-distance's
@@ -314,10 +321,10 @@ def test_the_aggregate_requires_the_pandas_extra_of_the_distance_package() -> No
 
 
 def test_public_packages_declare_one_lockstep_version() -> None:
-    """Specification section 26: the five published distributions share one version.
+    """The five published distributions share one version.
 
     The version is restated a sixth time in code: `damicore.api.VERSION` is the value `run()`
-    stamps into every manifest as `damicore_version`, which section 18.5 makes mandatory run
+    stamps into every manifest as `damicore_version`, which is mandatory run
     provenance. Asserting it here rather than in a test of its own keeps one check total over
     every statement of the released version, so a release bump cannot leave one behind.
     """
@@ -335,7 +342,7 @@ def test_orchestrator_pins_every_stage_within_the_lockstep_minor() -> None:
     """
     version = _version("damicore")
     major, minor, _ = _release(version)
-    # Specification section 26: during 0.x an incompatible change increments the minor, so
+    # During 0.x an incompatible change increments the minor, so
     # the compatible range is capped at the next minor rather than the next major.
     ceiling = f"<{major}.{minor + 1}.0"
 
@@ -380,6 +387,67 @@ def test_publish_allowlist_matches_the_public_workspace_members() -> None:
         and PRIVATE_CLASSIFIER not in _classifiers(directory.name)
     }
     assert set(declared.group(1).split()) == publishable == PUBLIC
+
+
+# Written in halves so this guard is not itself the last file naming the retired document.
+RETIRED_SPECIFICATION = "DAMICORE_IMPLEMENTATION" + "_SPECIFICATION"
+# Either noun followed by a number, in any case, because the retired document was cited
+# both ways and often without the two words adjacent -- a citation that wraps across lines
+# puts arbitrary text between them. Anchoring on the number instead of on a fixed pair of
+# words is what makes the guard total. No example is spelled out here: this file is scanned
+# like every other, so a literal citation in this comment would match itself.
+SECTION_CITATION = re.compile(
+    r"\b(sections?|specifications?)\s+\d+(\.\d+)*\b", re.IGNORECASE
+)
+SCANNED_SUFFIXES = {
+    ".cfg",
+    ".ipynb",
+    ".json",
+    ".md",
+    ".mk",
+    ".py",
+    ".toml",
+    ".yaml",
+    ".yml",
+}
+# Suffixless files worth scanning. Deliberately not every suffixless file: LICENSE numbers
+# its own clauses and refers to them by number, which is the licence citing itself, and
+# .gitignore carries unrelated patterns.
+SCANNED_NAMES = {"Makefile"}
+# `.github` is the one dot-directory that holds sources; the rest are caches and virtualenvs.
+SCANNED_DOT_DIRECTORY = ".github"
+
+
+def test_no_repository_file_cites_the_retired_implementation_specification() -> None:
+    """The implementation specification was retired, so every rule has to be stated where it
+    is enforced rather than cited by section number into a document that no longer exists.
+
+    Source comments ship inside the published wheels, which makes a dangling citation a
+    user-visible defect rather than an internal one.
+    """
+    surfaces = [
+        path
+        for path in ROOT.rglob("*")
+        if (path.suffix in SCANNED_SUFFIXES or path.name in SCANNED_NAMES)
+        # Directories only. Applying this to the filename too would skip every dotfile,
+        # including `.pre-commit-config.yaml`, which cited the retired document.
+        and not any(
+            part.endswith(".egg-info")
+            or part in {"dist", "build", "__pycache__", ".agents"}
+            or (part.startswith(".") and part != SCANNED_DOT_DIRECTORY)
+            for part in path.relative_to(ROOT).parts[:-1]
+        )
+    ]
+    # Guards the discovery: an empty or truncated scan would make the assertion below vacuous.
+    # Set just under the current count, so losing a whole directory fails here.
+    assert len(surfaces) >= 100, len(surfaces)
+
+    citing: list[str] = []
+    for path in surfaces:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if RETIRED_SPECIFICATION in text or SECTION_CITATION.search(text):
+            citing.append(str(path.relative_to(ROOT)))
+    assert not citing, citing
 
 
 def test_every_test_module_declares_a_registered_marker() -> None:
