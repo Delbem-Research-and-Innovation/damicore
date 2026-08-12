@@ -47,6 +47,13 @@ jobs:
                   version = tomllib.load(handle)["project"]["version"]
               if version != expected:
                   mismatches.append(f"{path}: version {version} != tag version {expected}")
+          # The same cheap-mistake class as a version mismatch: the build job's changelog
+          # extraction requires this exact heading, and discovering its absence there costs
+          # the whole benchmark first.
+          heading = f"## {expected}\n"
+          with open("CHANGELOG.md", encoding="utf-8") as handle:
+              if heading not in handle.read():
+                  mismatches.append(f"CHANGELOG.md: no '## {expected}' section for this tag")
           if mismatches:
               print("\n".join(mismatches), file=sys.stderr)
               sys.exit(1)
@@ -58,6 +65,10 @@ jobs:
   # threshold, so it would cost minutes here without being able to fail.
   benchmark:
     needs: tag-guard
+    # Explicit rather than inherited: the workflow default is `permissions: {}`, and the
+    # called workflow's checkout needs contents read the moment the repository is private.
+    permissions:
+      contents: read
     uses: ./.github/workflows/benchmark.yml
     with:
       select: large

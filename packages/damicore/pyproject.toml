@@ -1,7 +1,7 @@
 [project]
 name = "damicore"
 version = "0.1.0"
-description = "Pipeline orchestrator that sequences the damicore_* packages (normalizer, distance, tree_builder, clusterizer)."
+description = "Clusters the rows or columns of a CSV through exact compression distance, deterministic Neighbor Joining, and FastGreedy community detection."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

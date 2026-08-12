@@ -60,3 +60,4 @@ make build
 
 Python 3.11–3.14 is supported. The normative contract is
 [`DAMICORE_IMPLEMENTATION_SPECIFICATION.md`](DAMICORE_IMPLEMENTATION_SPECIFICATION.md).
+Publishing a version is documented in [docs/releasing.md](docs/releasing.md).
