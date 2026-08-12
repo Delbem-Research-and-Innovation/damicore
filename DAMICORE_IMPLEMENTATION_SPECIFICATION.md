@@ -666,6 +666,8 @@ Se o denominador for zero, DistanceComputationError é levantado. Na prática, u
 
 Os pares são enumerados lexicograficamente por i e j e particionados em shards contíguos de pairs_per_shard. ProcessPoolExecutor usa multiprocessing.get_context("spawn").
 
+Com workers > 1 os processos spawnados reimportam o módulo do chamador. Uma chamada em nível de módulo em script .py DEVE estar sob `if __name__ == "__main__":`; notebook e REPL já satisfazem a condição. A ausência da guarda mata o pool, e essa falha DEVE ser reportada como DistanceComputationError nomeando a guarda e a alternativa workers=1, nunca como BrokenProcessPool cru.
+
 Cada worker:
 
 1. recebe IDs, paths, tamanhos comprimidos e pares de um shard;

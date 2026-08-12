@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any, cast
 
@@ -176,8 +177,13 @@ def test_resume_after_each_shard_boundary_matches_clean_run(
 
     monkeypatch.setattr(distance_api, "_worker", fail_at_boundary)
     interrupted = tmp_path / f"interrupted-{fail_after}"
-    with pytest.raises(RuntimeError, match="injected"):
+    # A worker failure reaches the caller as a typed error carrying the original as its cause:
+    # section 19 requires a stable code on every public failure, whatever went wrong inside.
+    with pytest.raises(DistanceError) as raised:
         compute_distance_matrix(normalized.manifest_path, interrupted, config=config)
+    assert raised.value.code == "distance_computation_error"
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert "injected" in str(raised.value.__cause__)
     monkeypatch.setattr(distance_api, "_worker", original_worker)
 
     resumed = compute_distance_matrix(normalized.manifest_path, interrupted, config=config)
@@ -570,3 +576,40 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
 
     assert consumed == list(range(total))
     assert submitted == list(range(total))
+
+
+# Section 19 requires a stable code on every public failure. A worker dies as BrokenProcessPool
+# with no cause attached, and any other worker exception arrives as whatever type it was.
+def _raising(exc: BaseException) -> Iterator[distance_api.WorkerResult]:
+    def generate() -> Iterator[distance_api.WorkerResult]:
+        raise exc
+        yield  # pragma: no cover - unreachable, makes this a generator
+
+    return generate()
+
+
+def test_a_dead_worker_pool_names_the_guard_and_the_serial_alternative() -> None:
+    results = distance_api._typed_results(_raising(BrokenProcessPool("gone")))
+    with pytest.raises(DistanceError) as raised:
+        list(results)
+    assert raised.value.code == "distance_computation_error"
+    assert '`if __name__ == "__main__":`' in str(raised.value)
+    assert "workers=1" in str(raised.value)
+
+
+def test_an_unexpected_worker_exception_becomes_a_typed_error() -> None:
+    results = distance_api._typed_results(_raising(MemoryError("shard too large")))
+    with pytest.raises(DistanceError) as raised:
+        list(results)
+    assert raised.value.code == "distance_computation_error"
+    assert isinstance(raised.value.__cause__, MemoryError)
+
+
+def test_a_typed_worker_error_passes_through_unchanged() -> None:
+    """A DistanceError raised inside a worker already carries its own code; relabelling it
+    would replace a precise diagnosis, such as a compression failure, with a generic one."""
+    original = DistanceError("Could not compress object", code="compression_error")
+    results = distance_api._typed_results(_raising(original))
+    with pytest.raises(DistanceError) as raised:
+        list(results)
+    assert raised.value is original
