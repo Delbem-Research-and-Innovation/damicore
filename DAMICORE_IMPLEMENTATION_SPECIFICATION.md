@@ -1027,6 +1027,7 @@ Cada exceção pública DEVE possuir code estável em snake_case, message acion�
 | 4 | falha algorítmica ou artefato inválido |
 | 5 | conflito de saída ou checkpoint |
 | 130 | interrupção pelo usuário |
+| 141 | encerramento por pipe quebrado (convenção SIGPIPE), por exemplo ao encadear a saída com `head` |
 
 KeyboardInterrupt fecha workers, flushes seguros e reporta a etapa como interrompida sem imprimir traceback pela CLI. Na API Python, KeyboardInterrupt é propagado.
 
