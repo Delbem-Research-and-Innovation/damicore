@@ -17,12 +17,18 @@ classifiers = [
 ]
 dependencies = []
 
-[tool.uv]
-package = true
-
 [build-system]
-requires = ["hatchling>=1.27,<2"]
+requires = ["hatchling>=1.31.0,<2"]
 build-backend = "hatchling.build"
+
+# Workspace-only files are excluded on purpose: each package's Makefile only includes
+# ../package.mk, pyrightconfig.json extends ../../pyrightconfig.json, and tests/ depends
+# on the workspace conftest and dev tooling, so none of them work in an sdist unpacked
+# outside the monorepo. The repository .gitignore still ships: hatchling force-includes
+# the located VCS ignore file so an sdist-to-wheel build selects files the same way, and
+# `exclude` deliberately cannot override that.
+[tool.hatch.build.targets.sdist]
+exclude = ["Makefile", "pyrightconfig.json", "tests"]
 
 [tool.ruff]
 line-length = 100

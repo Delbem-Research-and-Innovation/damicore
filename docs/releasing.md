@@ -1,0 +1,77 @@
+# Releasing DAMICORE
+
+Operational guide for maintainers. The normative release rules live in
+`DAMICORE_IMPLEMENTATION_SPECIFICATION.md`, section 25.4; this file records only the
+facts that exist outside the repository.
+
+## Trigger
+
+Merging to `main` releases automatically: `auto-tag.yml` sees `main` declaring a
+version with no `vX.Y.Z` tag yet, verifies it against the five public
+`pyproject.toml` files and the `## X.Y.Z` changelog heading, pushes the tag, and
+dispatches `release.yml` on it. A merge that does not change the version does
+nothing. Pushing the tag by hand still works and runs the same pipeline.
+
+To release: set the five `pyproject.toml` versions, add the `## X.Y.Z`
+changelog section, run `uv sync --all-packages --group dev` so `uv.lock` records
+the new versions (every CI job installs with `--locked` and fails on a stale
+lock), and merge. For a fully automatic flow the `release-<project>`
+environments must have no required reviewers; adding reviewers turns each
+publish into approval clicks instead.
+
+## Gate chain (`.github/workflows/release.yml`)
+
+1. Tag/version guard: fast check that the tag agrees with the declared versions.
+2. Large-input benchmark: proves the resource budget at the tag commit.
+3. Check, test, build: `make check`, `make test`, one build verified against the
+   tag, `twine check`, changelog section extraction.
+4. TestPyPI publish via Trusted Publishing.
+5. Clean-environment smoke on Python 3.11–3.14: third-party dependencies are
+   installed from PyPI using the built artifacts, then the five DAMICORE
+   distributions are swapped for their pinned TestPyPI publications; the CLI and
+   pipeline smoke run against that environment (notebook on 3.12 only).
+6. PyPI publish via Trusted Publishing, same artifacts as step 4.
+7. GitHub Release with the version's changelog section and `SHA256SUMS`.
+
+## External preconditions (configure before the first tag)
+
+Trusted Publishing "pending publisher" entries on both indexes, one per project
+name, all with owner `Delbem-Research-and-Innovation`, repository `damicore`,
+workflow `release.yml` — 10 entries in total. PyPI keeps pending publishers
+unique on (owner, repository, workflow, environment) regardless of project
+name, so each project needs its own environment, `release-<project>`:
+
+| Index | Project | Environment |
+|---|---|---|
+| pypi.org | damicore | release-damicore |
+| pypi.org | damicore-normalizer | release-damicore-normalizer |
+| pypi.org | damicore-distance | release-damicore-distance |
+| pypi.org | damicore-tree-builder | release-damicore-tree-builder |
+| pypi.org | damicore-clusterizer | release-damicore-clusterizer |
+| test.pypi.org | damicore | release-damicore |
+| test.pypi.org | damicore-normalizer | release-damicore-normalizer |
+| test.pypi.org | damicore-distance | release-damicore-distance |
+| test.pypi.org | damicore-tree-builder | release-damicore-tree-builder |
+| test.pypi.org | damicore-clusterizer | release-damicore-clusterizer |
+
+Additionally:
+
+- The five `release-<project>` GitHub environments are created automatically the
+  first time the publish jobs reference them; pre-create them in Settings →
+  Environments only to attach required reviewers (each reviewed environment adds
+  one approval per index to every release).
+- The organization's actions policy must allow the pinned third-party actions:
+  `pypa/gh-action-pypi-publish`, `softprops/action-gh-release`, `astral-sh/setup-uv`.
+- The repository must be public, or the metadata URLs baked into the wheels 404.
+- Runners need roughly 5 GiB of free disk for the large benchmark.
+
+## After a failed run
+
+- Re-running the workflow is safe: `skip-existing` makes uploads of files already
+  on TestPyPI (or PyPI) a no-op instead of a failure. The corollary: an index
+  never replaces a file it already holds, so after the first TestPyPI publish of
+  a version, its bytes there are frozen even if a re-tag rebuilt them; compare
+  the TestPyPI downloads against the run's `SHA256SUMS` when in doubt.
+- Artifacts are never rebuilt between TestPyPI and PyPI; both publish jobs upload
+  the exact files the build job produced.
+- A version that reached PyPI cannot be retracted; fix forward with a new patch tag.

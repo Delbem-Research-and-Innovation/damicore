@@ -1,7 +1,7 @@
 [project]
 name = "damicore"
 version = "0.1.0"
-description = "Pipeline orchestrator that sequences the damicore_* packages (normalizer, distance, tree_builder, clusterizer)."
+description = "Clusters the rows or columns of a CSV through exact compression distance, deterministic Neighbor Joining, and FastGreedy community detection."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -11,6 +11,7 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -30,9 +31,6 @@ dependencies = [
     "tqdm>=4.66,<5",
 ]
 
-[tool.uv]
-package = true
-
 [project.scripts]
 damicore = "damicore.cli:main"
 
@@ -40,11 +38,21 @@ damicore = "damicore.cli:main"
 Homepage = "https://github.com/Delbem-Research-and-Innovation/damicore"
 Repository = "https://github.com/Delbem-Research-and-Innovation/damicore"
 Issues = "https://github.com/Delbem-Research-and-Innovation/damicore/issues"
+Documentation = "https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/quickstart.md"
 Changelog = "https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/CHANGELOG.md"
 
 [build-system]
-requires = ["hatchling>=1.27,<2"]
+requires = ["hatchling>=1.31.0,<2"]
 build-backend = "hatchling.build"
+
+# Workspace-only files are excluded on purpose: each package's Makefile only includes
+# ../package.mk, pyrightconfig.json extends ../../pyrightconfig.json, and tests/ depends
+# on the workspace conftest and dev tooling, so none of them work in an sdist unpacked
+# outside the monorepo. The repository .gitignore still ships: hatchling force-includes
+# the located VCS ignore file so an sdist-to-wheel build selects files the same way, and
+# `exclude` deliberately cannot override that.
+[tool.hatch.build.targets.sdist]
+exclude = ["Makefile", "pyrightconfig.json", "tests"]
 
 [tool.ruff]
 line-length = 100

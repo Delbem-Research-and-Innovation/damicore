@@ -63,6 +63,7 @@ branch on the status and log the reason.
 | 4 | An artifact failed validation |
 | 5 | The output directory conflicts, or a checkpoint does not match |
 | 130 | Interrupted; the run is resumable |
+| 141 | Terminated by a broken pipe (the SIGPIPE convention), e.g. when piping to `head` |
 
 ## Results
 

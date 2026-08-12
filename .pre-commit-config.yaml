@@ -9,7 +9,7 @@ repos:
     # Must stay inside the workspace's ruff range, in pyproject.toml. A different major here
     # runs a different default rule set than `make check`, so the hook and the gate disagree
     # about the same file and the pre-commit run stops being evidence.
-    rev: v0.16.0
+    rev: v0.16.2
     hooks:
       # Auto-fix import sorting, unused imports, and other fixable lint rules.
       # --exit-non-zero-on-fix: if files were modified, fail so developer sees
@@ -20,9 +20,13 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
+      # A two-space line ending in Markdown is a hard line break, not stray whitespace;
+      # the specification's header depends on them. This keeps the hook from rewriting
+      # rendering while still trimming real trailing whitespace everywhere else.
       - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
       - id: check-merge-conflict
       - id: check-yaml

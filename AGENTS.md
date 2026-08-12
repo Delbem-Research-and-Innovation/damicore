@@ -67,7 +67,7 @@ replace the cases with the axis. Collapse unused abstractions back to direct cod
 ## Python design and implementation
 
 - New 0.1 code must support Python `>=3.11,<3.15`, use the `src/` layout, pass Ruff, and
-  satisfy Pyright strict mode. Current narrower metadata is migration work, not authority.
+  satisfy Pyright strict mode.
 - Prefer a functional core with an imperative shell: pure transformations in the center;
   path access, process pools, persistence, logging, and progress at explicit boundaries.
 - Prefer small, cohesive functions. Use classes when they encode a data contract, stateful

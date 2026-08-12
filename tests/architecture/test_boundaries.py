@@ -209,13 +209,16 @@ def test_public_pyprojects_contain_no_workspace_paths_or_typer() -> None:
 # fields are also the only ones nothing else in the repository reads, so without this they are
 # unverified by construction. The assertions are about presence and shape, never the text of a
 # field, so ordinary editing stays free.
-REQUIRED_URLS = frozenset({"Homepage", "Repository", "Issues", "Changelog"})
+REQUIRED_URLS = frozenset(
+    {"Homepage", "Repository", "Issues", "Documentation", "Changelog"}
+)
 SHARED_CLASSIFIERS = frozenset(
     {
         "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3 :: Only",
         "Topic :: Scientific/Engineering :: Information Analysis",
         "Typing :: Typed",
     }
@@ -475,6 +478,7 @@ def test_package_tool_configuration_does_not_drift() -> None:
 
     ruff: dict[str, object] = {}
     pytest_options: dict[str, dict[str, object]] = {}
+    hatch: dict[str, object] = {}
     for member in members:
         with (ROOT / "packages" / member / "pyproject.toml").open("rb") as stream:
             tool = tomllib.load(stream)["tool"]
@@ -486,6 +490,10 @@ def test_package_tool_configuration_does_not_drift() -> None:
         options["addopts"] = addopts.replace(f"--cov={member}", "--cov=<member>")
         ruff[member] = tool["ruff"]
         pytest_options[member] = options
+        # The sdist exclude list is the third six-copy convention; a member that quietly
+        # ships its tests or Makefile again would otherwise surface only to a user
+        # unpacking the published sdist.
+        hatch[member] = tool["hatch"]
 
     reference = members[0]
     for member in members[1:]:
@@ -494,4 +502,9 @@ def test_package_tool_configuration_does_not_drift() -> None:
             member,
             pytest_options[member],
             pytest_options[reference],
+        )
+        assert hatch[member] == hatch[reference], (
+            member,
+            hatch[member],
+            hatch[reference],
         )

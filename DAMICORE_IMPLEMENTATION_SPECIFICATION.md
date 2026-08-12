@@ -260,10 +260,11 @@ ruff = ">=0.15,<0.17"
 pyright = ">=1.1,<2"
 pandas-stubs = ">=2.2,<4"
 build = ">=1.2,<2"
-twine = ">=6,<7"
+twine = ">=7,<8"
 pip-audit = ">=2.9,<3"
 nbformat = ">=5.10,<6"
 nbclient = ">=0.10,<1"
+pre-commit = ">=4,<5"
 ~~~
 
 O CI NÃO DEVE usar tags latest. Actions, uv e ferramentas DEVEM ter versão fixada.
@@ -1026,6 +1027,7 @@ Cada exceção pública DEVE possuir code estável em snake_case, message acion�
 | 4 | falha algorítmica ou artefato inválido |
 | 5 | conflito de saída ou checkpoint |
 | 130 | interrupção pelo usuário |
+| 141 | encerramento por pipe quebrado (convenção SIGPIPE), por exemplo ao encadear a saída com `head` |
 
 KeyboardInterrupt fecha workers, flushes seguros e reporta a etapa como interrompida sem imprimir traceback pela CLI. Na API Python, KeyboardInterrupt é propagado.
 
@@ -1262,7 +1264,9 @@ Não existe lane agendada. As atualizações chegam pelo Dependabot, configurado
 
 ### 25.4 release.yml
 
-Disparo por tag vX.Y.Z. Ordem:
+Disparo por tag vX.Y.Z. A tag PODE ser criada e o workflow despachado automaticamente
+quando main passa a declarar uma versão que ainda não possui tag; o release continua
+definido pela tag e por todos os gates abaixo. Ordem:
 
 1. confirmar que versões dos cinco pacotes e tag são iguais;
 2. executar CI e build do commit da tag;

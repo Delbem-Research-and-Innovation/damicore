@@ -3,6 +3,10 @@ name: Release
 on:
   push:
     tags: ["v*.*.*"]
+  # auto-tag.yml creates the version tag with the workflow token, and tag pushes made with
+  # that token deliberately fire no workflows, so it dispatches this one on the tag ref
+  # instead. GITHUB_REF_NAME is the tag either way; every job below reads the same value.
+  workflow_dispatch:
 
 # Granted per job, never here. The token that can publish to PyPI must not be present in a
 # job that runs repository code: `make test` executes the project and its development
@@ -16,10 +20,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Specification section 25.4, step 1: the tag and the five package versions must agree
+  # before step 2 runs anything. Checking the sources costs seconds here; without this gate
+  # a mistyped tag is caught only by verify-dist, after the benchmark, check, and test chain
+  # has burned about ninety minutes. The build job still re-verifies the built artifacts;
+  # this job exists purely to fail fast on the cheap, common mistake.
+  tag-guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      # The publish matrices consume this as PyPI distribution names. Derived from the same
+      # Make allowlist as every other job, so a package added there publishes here without a
+      # second list to forget.
+      dists: ${{ steps.allowlist.outputs.dists }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      # The stock python3 of ubuntu-24.04 with stdlib tomllib is enough: setting up uv here
+      # would cost more than the check itself. The package list comes from the same Make
+      # target the build and smoke jobs use, and the check itself is shared with auto-tag,
+      # so both the allowlist and the guard have one source of truth.
+      - name: Confirm every public package version equals the tag
+        run: |
+          python3 .github/scripts/version_guard.py "${GITHUB_REF_NAME#v}" \
+            $(make -s print-public-packages)
+      - name: Export the allowlist as distribution names
+        id: allowlist
+        run: |
+          dists=$(printf '%s\n' $(make -s print-public-packages) | tr '_' '-' | jq -cRn '[inputs]')
+          echo "dists=$dists" >> "$GITHUB_OUTPUT"
+
   # Specification section 24.4: the 2 GiB resource budget is proven at the tag commit, before
   # anything irreversible is published. The object sweep is left out because it asserts no
   # threshold, so it would cost minutes here without being able to fail.
   benchmark:
+    needs: tag-guard
+    # Explicit rather than inherited: the workflow default is `permissions: {}`, and the
+    # called workflow's checkout needs contents read the moment the repository is private.
+    permissions:
+      contents: read
     uses: ./.github/workflows/benchmark.yml
     with:
       select: large
@@ -32,7 +74,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/uv-workspace
@@ -46,10 +88,11 @@ jobs:
       - run: make check
       - run: make test
 
-      # Specification section 25.4, step 1, checked against the artifacts that will be
-      # published rather than against the sources they came from. verify-dist rejects a
-      # version that any distribution disagrees on, so lockstep and tag agreement are one
-      # assertion instead of a loop over the five pyproject files.
+      # Re-verifies section 25.4 step 1 against the artifacts that will actually be
+      # published rather than the sources they came from; the fast source-level gate is
+      # tag-guard. verify-dist rejects a version that any distribution disagrees on, so
+      # lockstep and tag agreement are one assertion instead of a loop over the five
+      # pyproject files.
       - name: Build once and verify against the tag
         run: |
           make build
@@ -73,12 +116,12 @@ jobs:
 
       # Two artifacts, because packages-dir must hold nothing but distributions: the publish
       # action uploads whatever it finds there.
-      - uses: actions/upload-artifact@v4.6.2
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: distributions
           path: dist/*
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4.6.2
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-metadata
           path: |
@@ -86,25 +129,43 @@ jobs:
             RELEASE_NOTES.md
           if-no-files-found: error
 
-  # Holds the publishing token. No checkout, no project code, one action.
+  # Holds the publishing token. No checkout, no project code, one action per distribution.
+  # One matrix leg and one environment per distribution because PyPI's pending trusted
+  # publishers are unique on (owner, repository, workflow, environment) excluding the
+  # project name: a single shared environment could hold the pending claim for only one of
+  # the five names. release-<dist> gives each name its own claim, on both indexes.
   publish-testpypi:
-    needs: build
+    needs: [tag-guard, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: release
+    strategy:
+      # A missing publisher on one name must not strand the other four; skip-existing makes
+      # the re-run after fixing it a no-op for the ones that landed.
+      fail-fast: false
+      matrix:
+        dist: ${{ fromJSON(needs.tag-guard.outputs.dists) }}
+    environment: release-${{ matrix.dist }}
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4.3.0
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: distributions
           path: dist
+      # Wheel and sdist filenames normalise the name to underscores, so the glob cannot
+      # cross distributions: damicore-* matches only the aggregate's two files, never
+      # damicore_normalizer-*.
+      - name: Select this distribution's files
+        run: |
+          mkdir upload
+          cp dist/$(echo "${{ matrix.dist }}" | tr '-' '_')-* upload/
+          ls upload
       # skip-existing: a re-run must be able to reach the step that failed. Without it the
       # first upload rejects the duplicate and the run never gets past it.
-      - uses: pypa/gh-action-pypi-publish@release/v1.13.0
+      - uses: pypa/gh-action-pypi-publish@release/v1.14
         with:
           repository-url: https://test.pypi.org/legacy/
-          packages-dir: dist
+          packages-dir: upload
           skip-existing: true
 
   # The last gate before the irreversible publish, and the only one that exercises what a
@@ -123,7 +184,7 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/uv-workspace
@@ -135,14 +196,45 @@ jobs:
           echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           echo "PUBLIC_PACKAGES=$(make -s print-public-packages)" >> "$GITHUB_ENV"
 
-      - name: Smoke the TestPyPI publication
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: distributions
+          path: dist
+
+      # No multi-index install is deterministic here. Under uv's default first-index
+      # strategy the extra index (PyPI) has priority, so from the second release onward it
+      # already serves an older damicore and confines the first-party names to their old
+      # PyPI versions; "damicore==$VERSION", present only on TestPyPI at this point, cannot
+      # resolve. unsafe-best-match fixes that but exposes every third-party name to
+      # TestPyPI shadowing — a dry run selected a bogus python-dateutil 3.9.0 over PyPI's
+      # 2.9.x. So the install is split: third-party resolves only from PyPI, against the
+      # built wheels, and then the five first-party distributions are swapped for the
+      # TestPyPI publication, pinned and with --no-deps. That proves TestPyPI serves
+      # exactly the five tagged versions — the bytes users will fetch — and the resulting
+      # environment is what a real user's resolver produces once the PyPI publish lands.
+      # Deliberately not re-proven here: resolution purely from TestPyPI metadata.
+      # build.yml's find-links lanes and the final PyPI publication cover that.
+      - name: Resolve third-party dependencies from PyPI
         env:
           SMOKE_VENV: /tmp/damicore-release-smoke
         run: |
           uv venv "$SMOKE_VENV" --python "${{ matrix.python }}"
+          uv pip install --python "$SMOKE_VENV/bin/python" dist/*.whl
+
+      - name: Swap first-party for the TestPyPI publication
+        env:
+          SMOKE_VENV: /tmp/damicore-release-smoke
+        run: |
+          uv pip uninstall --python "$SMOKE_VENV/bin/python" \
+            $(printf -- '%s ' $PUBLIC_PACKAGES | tr '_' '-')
           uv pip install --python "$SMOKE_VENV/bin/python" \
-            --index-url https://test.pypi.org/simple \
-            --extra-index-url https://pypi.org/simple "damicore==$VERSION"
+            --index-url https://test.pypi.org/simple --no-deps \
+            $(printf -- "%s==$VERSION " $PUBLIC_PACKAGES | tr '_' '-')
+
+      - name: Smoke the TestPyPI publication
+        env:
+          SMOKE_VENV: /tmp/damicore-release-smoke
+        run: |
           "$SMOKE_VENV/bin/damicore" --help
           "$SMOKE_VENV/bin/python" .github/scripts/wheel_smoke.py \
             --pipeline $(printf -- '--package %s ' $PUBLIC_PACKAGES)
@@ -160,31 +252,53 @@ jobs:
             --name "$DAMICORE_NOTEBOOK_KERNEL" --display-name "$DAMICORE_NOTEBOOK_KERNEL"
           uv run pytest tests/notebooks -m notebook
 
-  # The irreversible step, and the GitHub release that records it. The same artifacts the
-  # build job produced; nothing is rebuilt between the two indexes.
+  # The irreversible step. The same artifacts the build job produced; nothing is rebuilt
+  # between the two indexes. Same per-distribution matrix and environments as the TestPyPI
+  # job, for the same pending-publisher uniqueness reason.
   publish-pypi:
-    needs: smoke
+    needs: [tag-guard, smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        dist: ${{ fromJSON(needs.tag-guard.outputs.dists) }}
+    environment: release-${{ matrix.dist }}
     permissions:
       id-token: write
-      contents: write
     steps:
-      - uses: actions/download-artifact@v4.3.0
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: distributions
           path: dist
-      - uses: actions/download-artifact@v4.3.0
+      - name: Select this distribution's files
+        run: |
+          mkdir upload
+          cp dist/$(echo "${{ matrix.dist }}" | tr '-' '_')-* upload/
+          ls upload
+      - uses: pypa/gh-action-pypi-publish@release/v1.14
+        with:
+          packages-dir: upload
+          skip-existing: true
+
+  # The record of the publish, separated from it so the only job that can write to the
+  # repository holds no publishing identity and vice versa.
+  github-release:
+    needs: publish-pypi
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: distributions
+          path: dist
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: release-metadata
 
-      - uses: pypa/gh-action-pypi-publish@release/v1.13.0
-        with:
-          packages-dir: dist
-          skip-existing: true
-
-      - uses: softprops/action-gh-release@v2.3.2
+      - uses: softprops/action-gh-release@v3.0.2
         with:
           body_path: RELEASE_NOTES.md
           files: |

@@ -1,6 +1,16 @@
 # damicore-distance
 
-Compute an exact, unclamped, float64 NCD matrix from a normalization manifest.
+damicore-distance computes an exact, unclamped, `float64` Normalized Compression
+Distance (NCD) matrix from a normalization manifest. It is the second stage of
+the DAMICORE pipeline; most users install the aggregate `damicore` distribution,
+which runs all four stages end to end. Install this package alone to compute NCD
+matrices without the rest of the pipeline.
+
+```bash
+pip install damicore-distance
+```
+
+## Python
 
 ```python
 from damicore_distance import DistanceConfig, compute_distance_matrix
@@ -12,5 +22,22 @@ result = compute_distance_matrix(
 )
 ```
 
-Compression is incremental, pairs are lexicographically sharded, only the
-coordinator writes the memory map, and compatible completed shards can resume.
+The manifest is produced by the sibling `damicore-normalizer` distribution; the
+call writes `distance.npy` and `labels.json`, the inputs the sibling
+`damicore-tree-builder` distribution consumes. Compression is incremental, pairs
+are lexicographically sharded, only the coordinator writes the memory map, and
+compatible completed shards can resume.
+
+`DistanceMatrixView` reads the matrix through NumPy slicing and `shape` with no
+extra dependency. Its two pandas conveniences, `head()` and `to_pandas()`, raise
+a `DistanceError` (`missing_dependency_error`) unless pandas is present; install
+it with `pip install "damicore-distance[pandas]"`.
+
+## Links
+
+- Repository: <https://github.com/Delbem-Research-and-Innovation/damicore>
+- Issues: <https://github.com/Delbem-Research-and-Innovation/damicore/issues>
+- Documentation:
+  <https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/quickstart.md>
+
+Licensed under Apache-2.0.
