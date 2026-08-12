@@ -6,11 +6,14 @@ import csv
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 from damicore import (
     ArtifactValidationError,
     CheckpointMismatchError,
+    DamicoreError,
     ExecutionConfig,
+    ResourceLimits,
     api,
     run,
 )
@@ -19,6 +22,11 @@ from damicore.pipeline import (
     resume_fingerprint,
     runtime_fingerprint,
 )
+from damicore_clusterizer import ClusterConfig
+from damicore_distance import DistanceConfig
+from damicore_normalizer import NormalizationConfig
+from damicore_tree_builder import TreeBuildConfig
+from pydantic import BaseModel, ValidationError
 from synthetic_data import generate_csv
 
 pytestmark = pytest.mark.contract
@@ -141,3 +149,105 @@ def test_incomplete_run_rejects_incompatible_runtime(
     monkeypatch.undo()
     with pytest.raises(CheckpointMismatchError):
         run(source, output_dir=run_dir, progress=False, execution=SERIAL)
+
+
+# Every public configuration model, so the rule is asserted once over all of them instead of
+# being restated per package, and a model exported later is covered the moment it appears here.
+PUBLIC_CONFIGS = [
+    pytest.param(ExecutionConfig, id="execution"),
+    pytest.param(ResourceLimits, id="resource-limits"),
+    pytest.param(NormalizationConfig, id="normalization"),
+    pytest.param(DistanceConfig, id="distance"),
+    pytest.param(TreeBuildConfig, id="tree-build"),
+    pytest.param(ClusterConfig, id="cluster"),
+]
+
+
+@pytest.mark.parametrize("model", PUBLIC_CONFIGS)
+def test_a_misspelled_configuration_field_is_rejected(model: type[BaseModel]) -> None:
+    """A dropped keyword is worse than a rejected one: the run silently uses the default, and
+    the artifacts it writes look valid while answering a different question."""
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        model(definitely_not_a_field=1)
+
+
+# The six data artifacts. manifest.json and report.json are excluded on purpose: they carry
+# timestamps, stage timings and peak RSS, so they cannot be byte-identical across two runs.
+DATA_ARTIFACTS = (
+    "distance.npy",
+    "labels.json",
+    "tree.json",
+    "tree.nwk",
+    "membership.csv",
+    "clusters.json",
+)
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        pytest.param("build_tree", id="fail-before-tree"),
+        pytest.param("cluster_tree", id="fail-before-clustering"),
+    ],
+)
+def test_a_resumed_run_publishes_the_same_bytes_as_a_fresh_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    """Resume is the most expensive guarantee in the pipeline, and its whole value rests on one
+    equivalence: finishing an interrupted run lands exactly where an uninterrupted one would
+    have. The distance package asserts that for its own matrix; nothing asserted it over the
+    artifacts a user actually reads.
+    """
+    source = generate_csv(
+        tmp_path / "dataset.csv", rows=24, columns=8, clusters=2, seed=42
+    )
+
+    fresh_dir = tmp_path / "fresh"
+    fresh = run(source, output_dir=fresh_dir, progress=False, execution=SERIAL)
+    fresh.close()
+
+    def interrupted(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("injected interruption")
+
+    resumed_dir = tmp_path / "resumed"
+    monkeypatch.setattr(api, stage, interrupted)
+    # The pipeline translates any stage failure into its public error, so that is what an
+    # interruption looks like from here.
+    with pytest.raises(DamicoreError, match="injected"):
+        run(source, output_dir=resumed_dir, progress=False, execution=SERIAL)
+    monkeypatch.undo()
+
+    resumed = run(source, output_dir=resumed_dir, progress=False, execution=SERIAL)
+    try:
+        assert resumed.report.status == "completed"
+    finally:
+        resumed.close()
+
+    for name in DATA_ARTIFACTS:
+        assert (resumed_dir / name).read_bytes() == (fresh_dir / name).read_bytes(), (
+            name
+        )
+
+
+def test_the_reported_ncd_range_agrees_with_the_persisted_matrix(
+    tmp_path: Path,
+) -> None:
+    """These three fields were asserted only by name, in the list of report fields, so a wrong
+    value was indistinguishable from a right one.
+
+    The comparison is over the whole matrix because that is what the implementation reports.
+    Note the consequence: the diagonal is exactly zero by contract, so ncd_min reads 0.0 on
+    every run where no pair is negative, and the informative signal is ncd_out_of_range_count.
+    """
+    run_dir = _completed_run(tmp_path)
+    report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    matrix = np.load(run_dir / "distance.npy", allow_pickle=False)
+
+    assert report["ncd_min"] == pytest.approx(float(matrix.min()))
+    assert report["ncd_max"] == pytest.approx(float(matrix.max()))
+    assert report["ncd_out_of_range_count"] == int(
+        ((matrix < 0.0) | (matrix > 1.0)).sum()
+    )
+    # The max is a real measurement rather than the diagonal: NCD above 1 is legal and this
+    # fixture stays under it, so the maximum has to come from an off-diagonal pair.
+    assert report["ncd_max"] > 0.0

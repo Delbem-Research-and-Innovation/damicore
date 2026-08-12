@@ -67,17 +67,25 @@ def _imports(path: Path) -> set[str]:
     return names
 
 
+# rglob, not glob: every package is flat today, so a top-level scan happens to see every
+# module. The day one grows a subpackage, glob would keep passing while checking nothing.
 def test_stage_packages_do_not_import_each_other_or_orchestrator() -> None:
     for stage in STAGES:
         source = ROOT / "packages" / stage / "src" / stage
-        for module in source.glob("*.py"):
+        modules = [
+            path for path in source.rglob("*.py") if "__pycache__" not in path.parts
+        ]
+        assert modules, stage
+        for module in modules:
             forbidden = (STAGES - {stage}) | {"damicore", "synthetic_data"}
             assert not (_imports(module) & forbidden), module
 
 
 def test_orchestrator_has_no_runtime_dependency_on_synthetic_data() -> None:
     source = ROOT / "packages/damicore/src/damicore"
-    for module in source.glob("*.py"):
+    modules = [path for path in source.rglob("*.py") if "__pycache__" not in path.parts]
+    assert modules
+    for module in modules:
         assert "synthetic_data" not in _imports(module), module
 
 

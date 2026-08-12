@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ResourceLimits(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     max_objects: int = Field(default=1_000, gt=0)
     max_pairs: int = Field(default=500_000, gt=0)
@@ -17,7 +17,7 @@ class ResourceLimits(BaseModel):
 
 
 class ExecutionConfig(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     workers: int | Literal["auto"] = "auto"
     csv_chunk_rows: int = Field(default=50_000, gt=0)

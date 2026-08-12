@@ -23,7 +23,7 @@ _PANDAS_REQUIRED = (
 
 
 class DistanceResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     matrix_path: Path
     labels_path: Path
