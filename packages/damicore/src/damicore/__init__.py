@@ -1,6 +1,6 @@
 from damicore_distance import DistanceMatrixView
 
-from damicore.api import estimate, load_result, run
+from damicore.api import VERSION, estimate, load_result, run
 from damicore.config import ExecutionConfig, ResourceLimits
 from damicore.errors import (
     ArtifactValidationError,
@@ -22,6 +22,10 @@ from damicore.errors import (
 )
 from damicore.estimate import ResourceEstimate
 from damicore.result import ArtifactPaths, DamicoreResult, RunReport
+
+# The attribute a consumer looks for. Not in __all__: it is metadata about the package,
+# not part of the API surface section 9.4 closes.
+__version__ = VERSION
 
 __all__ = [
     "run",

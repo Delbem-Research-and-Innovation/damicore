@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class NormalizationConfig(BaseModel):
     """Configuration for deterministic CSV normalization."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     split: Literal["columns", "rows"] = "columns"
     delimiter: str = ","

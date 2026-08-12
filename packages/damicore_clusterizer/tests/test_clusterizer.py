@@ -55,12 +55,13 @@ def test_fastgreedy_projects_every_leaf_deterministically(tmp_path: Path) -> Non
     assert sorted({int(row["cluster"]) for row in rows}) == list(range(first.cluster_count))
 
 
-def test_one_global_shift_lifts_the_most_negative_branch_above_zero(tmp_path: Path) -> None:
-    """The fixture's lowest branch is -0.5, so the shift must clear zero by the smallest
-    margin the implementation needs. The exact epsilon is not part of the contract."""
-    result = cluster_tree(_tree(tmp_path), tmp_path / "shifted")
-    assert result.branch_length_shift > 0.5
-    assert result.branch_length_shift == pytest.approx(0.5, abs=1e-6)
+def test_a_negative_branch_becomes_the_weakest_edge(tmp_path: Path) -> None:
+    """Neighbor Joining emits a negative branch where the matrix contradicts the split, so
+    that edge must be the weakest link in the graph. Weighting the lengths rather than their
+    reciprocals made it the strongest, which is the inversion this fixture pins."""
+    weights = _weights_by_edge(tmp_path)
+    assert weights[frozenset(("a", "i1"))] == pytest.approx(1.0)
+    assert weights[frozenset(("a", "i1"))] == pytest.approx(min(weights.values()))
 
 
 def test_an_occupied_output_directory_is_rejected(tmp_path: Path) -> None:
@@ -110,13 +111,6 @@ def _overflow_root_merge(value: dict[str, Any]) -> None:
     even though each operand is finite, so the schema's allow_inf_nan=False cannot catch it."""
     value["edges"][4].update(length=1e308)
     value["edges"][5].update(length=1e308)
-
-
-def _overflow_shift(value: dict[str, Any]) -> None:
-    """A hugely negative branch forces a shift so large that adding it to the largest branch
-    overflows, which the post-shift finiteness check exists to catch."""
-    value["edges"][0].update(length=-1e308)
-    value["edges"][1].update(length=1e308)
 
 
 # Each row breaks one clause of the tree contract and names the message that clause raises.
@@ -175,11 +169,6 @@ TREE_CONTRACT_MUTATIONS: list[tuple[str, TreeMutation, str]] = [
     ("edge-count-not-n-minus-one", _add_redundant_edge, "Unrooted tree must have n-1 edges"),
     ("disconnected-graph", _strand_one_leaf, "Tree graph is disconnected"),
     ("root-merge-overflows-to-infinity", _overflow_root_merge, "Branch lengths must be finite"),
-    (
-        "shift-overflows-adjusted-length",
-        _overflow_shift,
-        "Adjusted branch lengths must be positive",
-    ),
 ]
 
 
@@ -282,36 +271,81 @@ def test_an_unknown_configuration_field_is_rejected() -> None:
 def test_the_root_is_removed_by_merging_its_two_edges(tmp_path: Path) -> None:
     """Specification 16.1: a degree-two root is not a real bifurcation, so its two edges
     become one edge between its children carrying the summed length, and every edge weight
-    is the reciprocal of the shifted length. Both were unasserted while coverage read 100%."""
+    carries the summed length. This was unasserted while coverage read 100%."""
     graph_input = tree_graph.load_tree_graph(_tree(tmp_path))
     names = graph_input.vertex_names
-    # igraph's edge list and attribute access are untyped in the shipped stubs; the casts
-    # isolate that boundary rather than letting Unknown leak into the assertions.
-    graph = cast(Any, graph_input.graph)
-    lengths = {
-        frozenset((names[int(edge.source)], names[int(edge.target)])): 1.0 / float(edge["weight"])
-        for edge in graph.es
-    }
+    weights = _weights_by_edge(tmp_path)
 
     assert "nj_root" not in names
-    shift = graph_input.shift
-    # The fixture's root edges are 2.0 and 2.0, so the merged edge is 4.0 before the shift.
-    assert lengths[frozenset(("i1", "i2"))] == pytest.approx(4.0 + shift)
-    assert lengths[frozenset(("b", "i1"))] == pytest.approx(1.0 + shift)
+    # The fixture's root edges are 2.0 and 2.0, so one edge of length 4.0 joins i1 and i2.
+    # Reciprocals are [-2, 1, 1, 1, 0.25]; their population deviation is sqrt(1.35), and each
+    # weight is 1 + (reciprocal - -2) / that deviation.
+    deviation = 1.35**0.5
+    assert weights[frozenset(("i1", "i2"))] == pytest.approx(1.0 + 2.25 / deviation)
+    assert weights[frozenset(("b", "i1"))] == pytest.approx(1.0 + 3.0 / deviation)
 
 
-def test_a_branch_far_below_zero_exhausts_the_shift_epsilon(tmp_path: Path) -> None:
-    """Specification 16.1 fixes the shift as `-min + 1e-12`, an absolute epsilon. Once the
-    minimum is large enough that 1e-12 falls below its ulp, the shifted minimum lands exactly
-    on zero and a structurally valid tree is refused. This pins that boundary as the current
-    contract; widening it means changing the formula the specification mandates.
-    """
+def test_a_branch_far_below_zero_is_weighted_rather_than_refused(tmp_path: Path) -> None:
+    """A large negative branch used to exhaust the absolute 1e-12 epsilon and refuse a
+    structurally valid tree. Weighting the reciprocals has no epsilon to exhaust, so the
+    branch is simply the weakest edge however far below zero it sits."""
     payload = json.loads(_tree(tmp_path).read_text(encoding="utf-8"))
     payload["edges"][0].update(length=-1e5)
     source = tmp_path / "deep.json"
     source.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ClusterizerError, match="Adjusted branch lengths must be positive"):
+    result = cluster_tree(source, tmp_path / "out")
+    assert result.cluster_count >= 1
+
+
+@pytest.mark.parametrize(
+    ("length", "discriminator"),
+    [
+        pytest.param(0.0, "no reciprocal", id="zero-length"),
+        pytest.param(5e-324, "finite weight", id="reciprocal-overflows"),
+    ],
+)
+def test_a_branch_without_a_usable_reciprocal_is_rejected(
+    tmp_path: Path, length: float, discriminator: str
+) -> None:
+    """The weighting is total over every finite length except these two, where the reciprocal
+    does not exist as a float. Repairing them silently would reintroduce the unbounded weight
+    the formula exists to avoid, so they are refused with the reason named."""
+    payload = json.loads(_tree(tmp_path).read_text(encoding="utf-8"))
+    payload["edges"][0].update(length=length)
+    source = tmp_path / "degenerate.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ClusterizerError, match=discriminator) as raised:
         cluster_tree(source, tmp_path / "out")
+    assert raised.value.code == "tree_format_error"
+
+
+def test_equal_branch_lengths_give_every_edge_the_same_weight(tmp_path: Path) -> None:
+    """With no spread there is no ordering to preserve, and the deviation the weights are
+    divided by is zero. The limit is one weight for every edge, not a division by zero."""
+    payload = json.loads(_tree(tmp_path).read_text(encoding="utf-8"))
+    for edge in payload["edges"]:
+        # The root's two edges are merged into one, so they carry half each for the collapsed
+        # edge to match the rest.
+        edge["length"] = 0.5 if edge["source"] == "nj_root" else 1.0
+    source = tmp_path / "flat.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    graph = cast(Any, tree_graph.load_tree_graph(source).graph)
+    assert [float(edge["weight"]) for edge in graph.es] == [1.0] * len(graph.es)
+
+
+def test_rescaling_every_branch_leaves_the_weights_unchanged(tmp_path: Path) -> None:
+    """The weights answer how branches compare, not what unit they are in, so a distance
+    matrix in different units must cluster identically."""
+    payload = json.loads(_tree(tmp_path).read_text(encoding="utf-8"))
+    scaled = tmp_path / "scaled.json"
+    for edge in payload["edges"]:
+        edge["length"] *= 1000.0
+    scaled.write_text(json.dumps(payload), encoding="utf-8")
+    original = cast(Any, tree_graph.load_tree_graph(_tree(tmp_path)).graph)
+    rescaled = cast(Any, tree_graph.load_tree_graph(scaled).graph)
+    assert [float(e["weight"]) for e in rescaled.es] == pytest.approx(
+        [float(e["weight"]) for e in original.es]
+    )
 
 
 # Staging happens before either rename, so a failure there must also leave nothing behind.
@@ -340,3 +374,79 @@ def test_a_failed_staged_write_leaves_no_temporary_file(
         cluster_tree(_tree(tmp_path), output)
 
     assert list(output.iterdir()) == []
+
+
+def _weights_by_edge(tmp_path: Path) -> dict[frozenset[str], float]:
+    """Edge weights of the fixture tree, keyed by the pair of node names each edge joins."""
+    graph_input = tree_graph.load_tree_graph(_tree(tmp_path))
+    names = graph_input.vertex_names
+    # igraph's edge list and attribute access are untyped in the shipped stubs; the cast
+    # isolates that boundary rather than letting Unknown leak into the assertions.
+    graph = cast(Any, graph_input.graph)
+    return {
+        frozenset((names[int(edge.source)], names[int(edge.target)])): float(edge["weight"])
+        for edge in graph.es
+    }
+
+
+# Three pairs, each under its own internal node, joined in a ladder. The structure is plain
+# enough that any weighting which reads the tree at all must recover exactly these groups.
+PLANTED_GROUPS = [("a", "b"), ("c", "d"), ("e", "f")]
+
+
+def _planted_tree(path: Path, shortest: float) -> Path:
+    """The planted tree with the a-i1 branch set to `shortest`, leaving the topology fixed."""
+    payload = {
+        "schema_version": 1,
+        "nodes": [
+            *({"id": leaf, "kind": "leaf", "label": leaf.upper()} for leaf in "abcdef"),
+            *(
+                {"id": inner, "kind": "internal", "label": None}
+                for inner in ("i1", "i2", "i3", "ix", "nj_root")
+            ),
+        ],
+        "root_id": "nj_root",
+        "edges": [
+            {"source": "i1", "target": "a", "length": shortest},
+            {"source": "i1", "target": "b", "length": 1.0},
+            {"source": "i2", "target": "c", "length": 1.0},
+            {"source": "i2", "target": "d", "length": 1.0},
+            {"source": "i3", "target": "e", "length": 1.0},
+            {"source": "i3", "target": "f", "length": 1.0},
+            {"source": "ix", "target": "i2", "length": 2.0},
+            {"source": "ix", "target": "i3", "length": 2.0},
+            {"source": "nj_root", "target": "i1", "length": 2.0},
+            {"source": "nj_root", "target": "ix", "length": 2.0},
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    "shortest",
+    [
+        pytest.param(1.0, id="ordinary"),
+        pytest.param(1e-1, id="short"),
+        pytest.param(1e-3, id="very-short"),
+        pytest.param(1e-6, id="near-zero"),
+        pytest.param(-1e-3, id="slightly-negative"),
+        pytest.param(-1.0, id="far-below-zero"),
+    ],
+)
+def test_the_recovered_partition_does_not_depend_on_the_shortest_branch(
+    tmp_path: Path, shortest: float
+) -> None:
+    """Modularity is a weighted sum, so an unbounded weight on one edge decides the partition
+    by itself and the planted structure stops being visible. Only the a-i1 branch varies here
+    and the topology never does, so recovering anything other than the planted groups means
+    the weighting, not the tree, chose the answer.
+    """
+    source = _planted_tree(tmp_path / "planted.json", shortest)
+    result = cluster_tree(source, tmp_path / "out")
+    with result.membership_path.open(encoding="utf-8", newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    grouped: dict[str, set[str]] = {}
+    for row in rows:
+        grouped.setdefault(row["cluster"], set()).add(row["object_id"])
+    assert sorted(map(sorted, grouped.values())) == [sorted(group) for group in PLANTED_GROUPS]

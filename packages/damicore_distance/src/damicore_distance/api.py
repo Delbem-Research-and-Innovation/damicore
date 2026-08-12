@@ -14,6 +14,7 @@ import zlib
 from collections import deque
 from collections.abc import Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
@@ -160,6 +161,46 @@ def _bounded_submit(
             yield pending.popleft().result()
     while pending:
         yield pending.popleft().result()
+
+
+# A spawned worker re-imports the caller's __main__ module, so a module-level call to this
+# stage re-enters it inside the child, which multiprocessing refuses. The pool then reports
+# only that some process died. The child's own explanation does reach stderr, but once per
+# worker and above the traceback the caller actually reads, so both real causes are named
+# here instead of leaving `BrokenProcessPool` as the whole diagnosis.
+_BROKEN_POOL_MESSAGE = (
+    "The distance worker pool died. Either this call runs at module level in a script and "
+    'needs to be guarded with `if __name__ == "__main__":`, or a worker was killed by the '
+    "operating system, typically for running out of memory. Passing workers=1 avoids the "
+    "pool entirely."
+)
+
+
+def _typed_results(results: Iterator[WorkerResult]) -> Iterator[WorkerResult]:
+    """Yield worker results, reporting a failed worker as a typed error.
+
+    Both concurrency modes pass through here, so the failure contract does not depend on the
+    worker count. Section 19 requires a stable code on every public failure, and an exception
+    raised inside a worker would otherwise reach the caller as whatever type it happened to
+    be: MemoryError on an oversized shard, zlib.error on a corrupt stream.
+    """
+    iterator = iter(results)
+    while True:
+        try:
+            value = next(iterator)
+        except StopIteration:
+            return
+        except DistanceError:
+            raise
+        except BrokenProcessPool as exc:
+            raise DistanceError(_BROKEN_POOL_MESSAGE, code="distance_computation_error") from exc
+        except Exception as exc:
+            raise DistanceError(
+                "Distance worker failed", code="distance_computation_error"
+            ) from exc
+        # Yielded outside the guard: a DistanceError raised by the consumer is its own, not a
+        # worker failure to be relabelled.
+        yield value
 
 
 def _validate_matrix(matrix: npt.NDArray[np.float64], block_size: int = 512) -> None:
@@ -436,7 +477,7 @@ def compute_distance_matrix(
     if progress is not None:
         progress(completed_pairs, pair_count, "distance")
     executor: ProcessPoolExecutor | None = None
-    results: Any
+    results: Iterator[WorkerResult]
     if settings.effective_workers == 1:
         results = map(_worker, arguments)
     else:
@@ -447,6 +488,7 @@ def compute_distance_matrix(
         # Two shards per worker: enough that a worker never idles waiting for the next
         # submission, small enough that the queued payload stays proportional to the pool.
         results = _bounded_submit(executor, arguments, settings.effective_workers * 2)
+    results = _typed_results(results)
     try:
         for shard_index, left, right, values in results:
             if len(left) != len(values) or not all(math.isfinite(value) for value in values):

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -98,3 +100,87 @@ def test_save_copies_completed_artifacts_to_empty_destination(tmp_path: Path) ->
             loaded.close()
     finally:
         result.close()
+
+
+# Every test above pins workers=1, which is the one execution path a user does not take by
+# default. These three cover the default instead.
+def _script(tmp_path: Path, source: Path, *, guarded: bool) -> Path:
+    call = (
+        f"result = run({str(source)!r}, output_dir={str(tmp_path / 'run')!r}, progress=False)\n"
+        "result.close()\n"
+        "print('completed')\n"
+    )
+    if guarded:
+        indented = "".join(f"    {line}\n" for line in call.splitlines())
+        body = f'if __name__ == "__main__":\n{indented}'
+    else:
+        body = call
+    script = tmp_path / ("guarded.py" if guarded else "unguarded.py")
+    script.write_text(f"from damicore import run\n\n{body}", encoding="utf-8")
+    return script
+
+
+def _run_script(script: Path) -> subprocess.CompletedProcess[str]:
+    # check=False: a non-zero exit is the subject of these assertions, and the messages below
+    # report the child's stderr, which CalledProcessError would swallow.
+    return subprocess.run(
+        [sys.executable, str(script)],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+
+
+def test_the_default_worker_count_completes_from_a_guarded_script(
+    tmp_path: Path,
+) -> None:
+    """The default worker count opens a process pool, which nothing else in the suite does:
+    every other test pins workers=1 and never reaches the pool at all."""
+    completed = _run_script(_script(tmp_path, _dataset(tmp_path), guarded=True))
+    assert completed.returncode == 0, completed.stderr[-2000:]
+    assert completed.stdout.strip() == "completed"
+
+
+def test_an_unguarded_module_level_call_names_the_missing_guard(tmp_path: Path) -> None:
+    """A spawned worker re-imports the caller's __main__, so an unguarded module-level call
+    re-enters the pipeline inside the child and multiprocessing refuses it. The pool reports
+    only that a process died, so the diagnosis has to name the guard the caller is missing."""
+    completed = _run_script(_script(tmp_path, _dataset(tmp_path), guarded=False))
+    assert completed.returncode != 0
+    assert '`if __name__ == "__main__":`' in completed.stderr
+    assert "workers=1" in completed.stderr
+
+
+ARTIFACTS = (
+    "distance.npy",
+    "labels.json",
+    "tree.json",
+    "tree.nwk",
+    "membership.csv",
+    "clusters.json",
+)
+
+
+def test_the_worker_count_does_not_change_any_artifact(tmp_path: Path) -> None:
+    """Section 14 makes the result independent of the worker count. The distance package
+    covers this for its own stage; this pins it for every artifact the pipeline publishes."""
+    source = _dataset(tmp_path)
+    serial = run(
+        source,
+        output_dir=tmp_path / "serial",
+        progress=False,
+        execution=ExecutionConfig(workers=1),
+    )
+    serial.close()
+    parallel = run(
+        source,
+        output_dir=tmp_path / "parallel",
+        progress=False,
+        execution=ExecutionConfig(workers=4),
+    )
+    parallel.close()
+    for name in ARTIFACTS:
+        assert (tmp_path / "serial" / name).read_bytes() == (
+            tmp_path / "parallel" / name
+        ).read_bytes(), name

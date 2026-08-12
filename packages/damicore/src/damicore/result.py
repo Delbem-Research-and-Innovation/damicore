@@ -51,7 +51,6 @@ class RunReport(BaseModel):
     ncd_max: float | None = None
     ncd_out_of_range_count: int = 0
     negative_branch_count: int = 0
-    branch_length_shift: float = 0.0
     modularity: float | None = None
     timings_seconds: dict[str, float] = Field(default_factory=dict)
     verification: dict[str, bool] = Field(default_factory=dict)

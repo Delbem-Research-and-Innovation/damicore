@@ -11,5 +11,4 @@ class ClusterResult(BaseModel):
     community_count: int = Field(ge=0)
     cluster_count: int = Field(ge=0)
     modularity: float = Field(allow_inf_nan=False)
-    branch_length_shift: float = Field(ge=0, allow_inf_nan=False)
     timing: float = Field(ge=0)

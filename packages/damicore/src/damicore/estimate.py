@@ -62,9 +62,15 @@ def preflight(
     path = Path(csv_path).resolve()
     if not path.is_file():
         raise InputValidationError(f"CSV path is not a readable regular file: {path}")
-    before = path.stat()
-    input_hash = _hash(path)
-    after_hash = path.stat()
+    try:
+        before = path.stat()
+        input_hash = _hash(path)
+        after_hash = path.stat()
+    except OSError as exc:
+        # is_file() answers existence and type, never readability. A file without read
+        # permission, on a dropped mount, or removed after the check above passes it and
+        # fails here, and the message above already promised this was checked.
+        raise InputValidationError(f"CSV path could not be read: {path}") from exc
     if (before.st_size, before.st_mtime_ns) != (after_hash.st_size, after_hash.st_mtime_ns):
         raise InputValidationError("CSV changed during preflight", code="input_drift")
     try:

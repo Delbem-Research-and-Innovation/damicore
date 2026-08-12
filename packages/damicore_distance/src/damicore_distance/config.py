@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class DistanceConfig(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     compressor: Literal["zlib", "gzip"] = "zlib"
     compression_level: int = Field(default=6, ge=0, le=9)

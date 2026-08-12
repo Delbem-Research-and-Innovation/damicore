@@ -235,10 +235,10 @@ Distribuição por pacote:
 | Pacote | Dependências diretas |
 |---|---|
 | damicore-normalizer | pandas, pydantic |
-| damicore-distance | numpy, pydantic |
+| damicore-distance | numpy, pydantic; pandas como extra opcional `[pandas]` |
 | damicore-tree-builder | numpy, pydantic |
 | damicore-clusterizer | igraph, numpy, pydantic |
-| damicore | damicore-normalizer, damicore-distance, damicore-tree-builder, damicore-clusterizer, pandas, pydantic, tqdm |
+| damicore | damicore-normalizer, damicore-distance[pandas], damicore-tree-builder, damicore-clusterizer, pandas, pydantic, tqdm |
 
 damicore DEVE declarar cada pacote irmão como >=0.1.0,<0.2.0. Os pyproject publicados NÃO DEVEM conter referências workspace, paths locais ou sources do uv.
 
@@ -344,6 +344,8 @@ DistanceMatrixView DEVE oferecer:
 - indexação NumPy somente leitura;
 - head(n=5) retornando DataFrame n por n;
 - to_pandas(force=False).
+
+head e to_pandas são os únicos pontos do pacote que usam pandas, declarado como extra `[pandas]`. Quando o extra não está instalado, ambos DEVEM falhar com erro tipado nomeando o extra a instalar; o restante da view (shape, dtype, labels, path e indexação NumPy) permanece disponível sem ele. damicore depende de damicore-distance[pandas], então o pipeline agregado sempre os tem.
 
 to_pandas falha com MaterializationError quando os bytes da matriz excedem pandas_materialization_limit_bytes, salvo force=True. A mensagem DEVE informar tamanho estimado e sugerir head ou acesso por fatias.
 
@@ -666,6 +668,8 @@ Se o denominador for zero, DistanceComputationError é levantado. Na prática, u
 
 Os pares são enumerados lexicograficamente por i e j e particionados em shards contíguos de pairs_per_shard. ProcessPoolExecutor usa multiprocessing.get_context("spawn").
 
+Com workers > 1 os processos spawnados reimportam o módulo do chamador. Uma chamada em nível de módulo em script .py DEVE estar sob `if __name__ == "__main__":`; notebook e REPL já satisfazem a condição. A ausência da guarda mata o pool, e essa falha DEVE ser reportada como DistanceComputationError nomeando a guarda e a alternativa workers=1, nunca como BrokenProcessPool cru.
+
 Cada worker:
 
 1. recebe IDs, paths, tamanhos comprimidos e pares de um shard;
@@ -830,13 +834,14 @@ Todos os nós internos e folhas participam da detecção de comunidades. Apenas 
 Para cada comprimento l:
 
 ~~~text
-min_length = menor comprimento de todas as arestas
-shift = (-min_length + 1e-12), se min_length <= 0; caso contrário 0
-adjusted_length = l + shift
-weight = 1 / adjusted_length
+w_bruto = 1 / l
+desvio  = desvio-padrão populacional de w_bruto sobre todas as arestas
+weight  = 1 + (w_bruto - min(w_bruto)) / desvio
 ~~~
 
-adjusted_length precisa ser finito e estritamente positivo. O shift é único e global, preservando a ordem dos comprimentos.
+O deslocamento é aplicado sobre os recíprocos, não sobre os comprimentos. Isso mantém weight >= 1, dá à branch negativa o menor peso em vez do maior, e limita a razão entre pesos à dispersão dos dados. A modularidade é uma soma ponderada, então um peso ilimitado decidiria a partição sozinho: como o recíproco cresce sem limite quando o comprimento se aproxima de zero, deslocar do lado dos comprimentos deixaria a partição ser escolhida pela menor branch, e não pela estrutura do grafo. O resultado é invariante a reescalar todos os comprimentos.
+
+Comprimento exatamente zero, e comprimento cujo recíproco não é finito, são TreeFormatError: qualquer reparo reintroduziria o peso ilimitado que a fórmula existe para evitar. Se o desvio for zero, todos os comprimentos são iguais e todo weight é 1.
 
 ### 16.2 Comunidades
 
@@ -980,7 +985,7 @@ Campos obrigatórios:
 - pico de RSS quando a plataforma oferecer resource.getrusage, senão null;
 - modularidade;
 - NCD mínimo, máximo e quantidade fora de 0..1;
-- quantidade de branches negativas e shift usado pelo clusterizer;
+- quantidade de branches negativas;
 - avisos e erro tipado;
 - resultado de cada verificação final.
 
@@ -1176,7 +1181,7 @@ Tree:
 Clusterizer:
 
 - remoção correta da raiz de grau dois;
-- shift global para comprimento não positivo;
+- pesos limitados e partição estável para comprimento próximo de zero ou negativo;
 - corte ótimo e corte k;
 - IDs determinísticos;
 - comunidades internas sem folhas;

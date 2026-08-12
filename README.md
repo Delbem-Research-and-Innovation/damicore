@@ -11,15 +11,20 @@ pip install damicore
 ```python
 from damicore import estimate, run
 
-preview = estimate("dataset.csv", split="columns")
-print(preview.model_dump())
+# The default worker count opens a process pool, and each worker re-imports the calling
+# module. In a `.py` script the call must therefore sit under this guard. A notebook or REPL
+# also satisfies it, so the guard is safe everywhere; `ExecutionConfig(workers=1)` avoids the
+# pool entirely.
+if __name__ == "__main__":
+    preview = estimate("dataset.csv", split="columns")
+    print(preview.model_dump())
 
-result = run("dataset.csv", split="columns")
-print(result.membership)
-print(result.clusters)
-print(result.tree_newick)
-print(result.distance_matrix.head())
-result.close()
+    result = run("dataset.csv", split="columns")
+    print(result.membership)
+    print(result.clusters)
+    print(result.tree_newick)
+    print(result.distance_matrix.head())
+    result.close()
 ```
 
 The default exact algorithm accepts at most 1,000 objects, 500,000 pairs, and

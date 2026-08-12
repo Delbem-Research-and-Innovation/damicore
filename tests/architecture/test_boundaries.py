@@ -67,17 +67,25 @@ def _imports(path: Path) -> set[str]:
     return names
 
 
+# rglob, not glob: every package is flat today, so a top-level scan happens to see every
+# module. The day one grows a subpackage, glob would keep passing while checking nothing.
 def test_stage_packages_do_not_import_each_other_or_orchestrator() -> None:
     for stage in STAGES:
         source = ROOT / "packages" / stage / "src" / stage
-        for module in source.glob("*.py"):
+        modules = [
+            path for path in source.rglob("*.py") if "__pycache__" not in path.parts
+        ]
+        assert modules, stage
+        for module in modules:
             forbidden = (STAGES - {stage}) | {"damicore", "synthetic_data"}
             assert not (_imports(module) & forbidden), module
 
 
 def test_orchestrator_has_no_runtime_dependency_on_synthetic_data() -> None:
     source = ROOT / "packages/damicore/src/damicore"
-    for module in source.glob("*.py"):
+    modules = [path for path in source.rglob("*.py") if "__pycache__" not in path.parts]
+    assert modules
+    for module in modules:
         assert "synthetic_data" not in _imports(module), module
 
 
@@ -165,7 +173,6 @@ def test_public_result_models_declare_the_specified_fields() -> None:
         "ncd_max",
         "ncd_out_of_range_count",
         "negative_branch_count",
-        "branch_length_shift",
         "modularity",
         "timings_seconds",
         "verification",
@@ -198,6 +205,53 @@ def test_public_pyprojects_contain_no_workspace_paths_or_typer() -> None:
         assert "file://" not in text
 
 
+# PyPI freezes metadata per version: a missing key is not a fix, it is a version number. These
+# fields are also the only ones nothing else in the repository reads, so without this they are
+# unverified by construction. The assertions are about presence and shape, never the text of a
+# field, so ordinary editing stays free.
+REQUIRED_URLS = frozenset({"Homepage", "Repository", "Issues", "Changelog"})
+SHARED_CLASSIFIERS = frozenset(
+    {
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Science/Research",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python :: 3",
+        "Topic :: Scientific/Engineering :: Information Analysis",
+        "Typing :: Typed",
+    }
+)
+
+
+def _urls(package: str) -> dict[str, str]:
+    declared = _project(package).get("urls", {})
+    if not isinstance(declared, dict):
+        return {}
+    return {
+        str(key): str(value) for key, value in cast(dict[str, object], declared).items()
+    }
+
+
+@pytest.mark.parametrize("package", sorted(PUBLIC))
+def test_every_public_package_carries_navigable_pypi_metadata(package: str) -> None:
+    urls = _urls(package)
+    assert REQUIRED_URLS <= set(urls), package
+    # The project declares no routable mailbox, so Issues is the contact channel and every
+    # link has to actually resolve as one.
+    assert all(value.startswith("https://") for value in urls.values()), urls
+    assert SHARED_CLASSIFIERS <= set(_classifiers(package)), package
+    keywords = _project(package).get("keywords", [])
+    assert isinstance(keywords, list)
+    assert keywords, package
+
+
+def test_every_public_package_ships_the_typing_marker_it_advertises() -> None:
+    """`Typing :: Typed` is a claim; py.typed is what makes it true. Asserting the classifier
+    without the file would let the distributions advertise types they do not deliver."""
+    for package in sorted(PUBLIC):
+        marker = ROOT / "packages" / package / "src" / package / "py.typed"
+        assert marker.is_file(), package
+
+
 def test_third_party_runtime_dependencies_are_exact() -> None:
     """Specification section 8.2 closes the runtime dependency set and its ranges."""
     expected = {
@@ -218,6 +272,42 @@ def test_third_party_runtime_dependencies_are_exact() -> None:
             if not dependency.startswith("damicore-")
         }
         assert third_party == dependencies, package
+
+
+def _optional_dependencies(package: str) -> dict[str, set[str]]:
+    declared = _project(package).get("optional-dependencies", {})
+    if not isinstance(declared, dict):
+        return {}
+    return {
+        str(extra): {str(entry) for entry in cast(list[object], entries)}
+        for extra, entries in cast(dict[str, object], declared).items()
+        if isinstance(entries, list)
+    }
+
+
+def test_optional_dependency_extras_are_exact() -> None:
+    """Section 8.2 closes the extras as well as the required set.
+
+    The check above reads only `[project.dependencies]`, so an extra is invisible to it: one
+    could be added, or silently widened, without any assertion noticing. damicore-distance's
+    pandas extra is what makes head() and to_pandas() optional, so its range is a contract.
+    """
+    expected: dict[str, dict[str, set[str]]] = {
+        "damicore_normalizer": {},
+        "damicore_distance": {"pandas": {"pandas>=2.2,<4"}},
+        "damicore_tree_builder": {},
+        "damicore_clusterizer": {},
+        "damicore": {},
+    }
+    for package, extras in expected.items():
+        assert _optional_dependencies(package) == extras, package
+
+
+def test_the_aggregate_requires_the_pandas_extra_of_the_distance_package() -> None:
+    """`pip install damicore` has to bring pandas with it: the documented quickstart calls
+    result.distance_matrix.head(). Depending on the bare distribution would leave that
+    example raising at runtime while every wheel still resolved and installed cleanly."""
+    assert "damicore-distance[pandas]>=0.1.0,<0.2.0" in _dependencies("damicore")
 
 
 def test_public_packages_declare_one_lockstep_version() -> None:
@@ -251,6 +341,9 @@ def test_orchestrator_pins_every_stage_within_the_lockstep_minor() -> None:
         if not dependency.startswith("damicore-"):
             continue
         name, _, specifier = dependency.partition(">=")
+        # An extra qualifies the requirement, not the distribution: damicore-distance[pandas]
+        # is still the damicore-distance release this pin has to bound.
+        name = name.partition("[")[0]
         floor, _, cap = specifier.partition(",")
         assert cap == ceiling, dependency
         assert _release(floor) <= _release(version), dependency

@@ -6,6 +6,7 @@ import json
 import logging
 import shutil
 import sys
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal
 
@@ -81,7 +82,11 @@ from damicore.progress import distance_progress
 from damicore.result import DamicoreResult, RunReport, artifact_paths
 
 SCHEMA_VERSION = 1
-VERSION = "0.1.0"
+# Read from the installed distribution rather than restated here. This value is stamped
+# into every manifest as run provenance, so a third copy of the version string could put
+# a number in an artifact that no distribution ever carried. It raises when damicore is
+# not installed, which is the honest outcome: there is no correct value to fall back to.
+VERSION = metadata.version("damicore")
 logger = logging.getLogger(__name__)
 
 # Specification section 11.3 requires ResourceLimitError itself to carry the distinction
@@ -525,6 +530,10 @@ def run(
     )
     manifest_path = run_dir / "manifest.json"
     existing_manifest: dict[str, Any] | None = None
+    # iterdir() on an existing non-directory raises NotADirectoryError, which is neither a
+    # public error nor a documented exit code, so the type is checked before it is walked.
+    if run_dir.exists() and not run_dir.is_dir():
+        raise OutputDirectoryConflictError(f"Output path is not a directory: {run_dir}")
     if run_dir.exists() and any(run_dir.iterdir()):
         try:
             existing_manifest = RunManifest.model_validate_json(
@@ -712,7 +721,6 @@ def run(
                 community_count=int(metrics["community_count"]),
                 cluster_count=int(metrics["cluster_count"]),
                 modularity=float(metrics["modularity"]),
-                branch_length_shift=float(metrics["branch_length_shift"]),
                 timing=_stage_seconds(journal, "clusterizing"),
             )
         else:
@@ -729,7 +737,6 @@ def run(
                     "community_count": clustered.community_count,
                     "cluster_count": clustered.cluster_count,
                     "modularity": clustered.modularity,
-                    "branch_length_shift": clustered.branch_length_shift,
                 },
             )
 
@@ -767,7 +774,6 @@ def run(
             ncd_max=ncd_max,
             ncd_out_of_range_count=out_of_range,
             negative_branch_count=tree.negative_branch_count,
-            branch_length_shift=clustered.branch_length_shift,
             modularity=clustered.modularity,
             timings_seconds=timings,
             verification=verification,
