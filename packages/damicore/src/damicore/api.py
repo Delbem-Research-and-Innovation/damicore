@@ -525,6 +525,10 @@ def run(
     )
     manifest_path = run_dir / "manifest.json"
     existing_manifest: dict[str, Any] | None = None
+    # iterdir() on an existing non-directory raises NotADirectoryError, which is neither a
+    # public error nor a documented exit code, so the type is checked before it is walked.
+    if run_dir.exists() and not run_dir.is_dir():
+        raise OutputDirectoryConflictError(f"Output path is not a directory: {run_dir}")
     if run_dir.exists() and any(run_dir.iterdir()):
         try:
             existing_manifest = RunManifest.model_validate_json(

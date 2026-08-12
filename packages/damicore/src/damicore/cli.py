@@ -4,6 +4,8 @@ import argparse
 import json
 import sys
 
+from pydantic import ValidationError
+
 from damicore import ExecutionConfig, ResourceLimits, estimate, run
 from damicore.errors import (
     ArtifactValidationError,
@@ -14,6 +16,7 @@ from damicore.errors import (
     OutputDirectoryConflictError,
     ResourceLimitError,
 )
+from damicore.result import DamicoreResult
 
 # Specification section 20 exposes four of the five resource limits as flags. Their values are
 # read from the model rather than restated here: ResourceLimits owns them, so raising a limit
@@ -92,8 +95,15 @@ def main(argv: list[str] | None = None) -> int:
     encoding: str = arguments.encoding
     keep_normalized: bool = arguments.keep_normalized
     save_diagnostics: bool = arguments.save_diagnostics
-    execution = _execution_from_arguments(arguments)
+    result: DamicoreResult | None = None
     try:
+        # ResourceLimits and ExecutionConfig own the bounds behind these flags, so building
+        # them is a validation step and belongs inside the handler: outside it, `--workers 0`
+        # reaches the user as a pydantic traceback instead of the documented exit code.
+        try:
+            execution = _execution_from_arguments(arguments)
+        except ValidationError as exc:
+            raise ConfigurationError(str(exc)) from exc
         if arguments.command == "estimate":
             preview = estimate(
                 csv_path,
@@ -134,13 +144,17 @@ def main(argv: list[str] | None = None) -> int:
             for name, path in result.artifacts:
                 if path is not None:
                     print(f"{name}: {path}", file=sys.stderr)
-            result.close()
         return 0
     except KeyboardInterrupt:
         return 130
     except DamicoreError as error:
         print(json.dumps({"code": error.code, "message": str(error)}), file=sys.stderr)
         return _exit_code(error)
+    finally:
+        # The result owns an open memory map. Closing it only after the artifact lines are
+        # printed leaks it whenever that write fails, which `damicore run | head` does.
+        if result is not None:
+            result.close()
 
 
 if __name__ == "__main__":

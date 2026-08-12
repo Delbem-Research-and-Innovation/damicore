@@ -1,6 +1,7 @@
 """Guards that back the specification's public contracts: the CLI exit-status table, the
 configuration bounds, the preflight input checks, and the manifest's own narrowing helpers."""
 
+import json
 import os
 from importlib import import_module
 from pathlib import Path
@@ -19,7 +20,7 @@ from damicore import (
     ResourceLimitError,
     estimate,
 )
-from damicore.cli import _exit_code
+from damicore.cli import _exit_code, main
 from damicore.manifest import atomic_json, json_mapping, json_sequence
 
 pytestmark = pytest.mark.unit
@@ -45,6 +46,59 @@ def test_every_public_failure_maps_to_its_documented_exit_status(
     error: DamicoreError, status: int
 ) -> None:
     assert _exit_code(error) == status
+
+
+# The table above pins the mapping from error to status, but it constructs every error by
+# hand, so it cannot see whether a failure reaches that mapping at all. These rows enter
+# through the real argv instead, which is the boundary a user actually crosses.
+CLI_REJECTED_FLAGS = [
+    pytest.param(["--workers", "0"], id="workers-below-one"),
+    pytest.param(["--max-objects", "0"], id="max-objects-zero"),
+    pytest.param(["--max-pairs", "-5"], id="max-pairs-negative"),
+    pytest.param(["--max-matrix-bytes", "0"], id="max-matrix-bytes-zero"),
+    pytest.param(["--max-working-memory-bytes", "-1"], id="max-working-memory-negative"),
+]
+
+
+@pytest.mark.parametrize("flags", CLI_REJECTED_FLAGS)
+def test_a_flag_the_config_rejects_leaves_the_cli_as_a_typed_configuration_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], flags: list[str]
+) -> None:
+    source = tmp_path / "input.csv"
+    source.write_text("a,b\naa,ab\n", encoding="utf-8")
+    assert main(["estimate", str(source), *flags]) == 2
+    assert json.loads(capsys.readouterr().err)["code"] == "configuration_error"
+
+
+def test_an_output_path_that_is_not_a_directory_is_a_typed_conflict(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The directory is walked with iterdir(), which raises NotADirectoryError on a file:
+    neither a public error nor a documented exit status."""
+    source = tmp_path / "input.csv"
+    source.write_text("a,b\naa,ab\n", encoding="utf-8")
+    occupied = tmp_path / "occupied"
+    occupied.write_text("not a directory", encoding="utf-8")
+    argv = ["run", str(source), "--no-progress", "--output-dir", str(occupied)]
+    assert main(argv) == 5
+    assert json.loads(capsys.readouterr().err)["code"] == "output_directory_conflict_error"
+
+
+def test_a_csv_that_cannot_be_read_is_a_typed_input_validation_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """is_file() answers existence and type, never readability, though the message it guards
+    promises both. A dropped mount or a revoked permission fails at the read instead."""
+    estimate_module = import_module("damicore.estimate")
+
+    def unreadable(path: Path) -> str:
+        raise OSError(13, "Permission denied")
+
+    source = tmp_path / "input.csv"
+    source.write_text("a,b\naa,ab\n", encoding="utf-8")
+    monkeypatch.setattr(estimate_module, "_hash", unreadable)
+    assert main(["estimate", str(source)]) == 2
+    assert json.loads(capsys.readouterr().err)["code"] == "input_validation_error"
 
 
 def test_workers_below_one_is_rejected() -> None:
