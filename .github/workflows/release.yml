@@ -16,10 +16,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Specification section 25.4, step 1: the tag and the five package versions must agree
+  # before step 2 runs anything. Checking the sources costs seconds here; without this gate
+  # a mistyped tag is caught only by verify-dist, after the benchmark, check, and test chain
+  # has burned about ninety minutes. The build job still re-verifies the built artifacts;
+  # this job exists purely to fail fast on the cheap, common mistake.
+  tag-guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      # The stock python3 of ubuntu-24.04 with stdlib tomllib is enough: setting up uv here
+      # would cost more than the check itself. The package list comes from the same Make
+      # target the build and smoke jobs use, so the allowlist has one source of truth.
+      - name: Confirm every public package version equals the tag
+        run: |
+          python3 - "${GITHUB_REF_NAME#v}" $(make -s print-public-packages) <<'EOF'
+          import sys
+          import tomllib
+
+          expected = sys.argv[1]
+          mismatches = []
+          for package in sys.argv[2:]:
+              path = f"packages/{package}/pyproject.toml"
+              with open(path, "rb") as handle:
+                  version = tomllib.load(handle)["project"]["version"]
+              if version != expected:
+                  mismatches.append(f"{path}: version {version} != tag version {expected}")
+          if mismatches:
+              print("\n".join(mismatches), file=sys.stderr)
+              sys.exit(1)
+          print(f"all {len(sys.argv) - 2} package versions equal tag version {expected}")
+          EOF
+
   # Specification section 24.4: the 2 GiB resource budget is proven at the tag commit, before
   # anything irreversible is published. The object sweep is left out because it asserts no
   # threshold, so it would cost minutes here without being able to fail.
   benchmark:
+    needs: tag-guard
     uses: ./.github/workflows/benchmark.yml
     with:
       select: large
@@ -46,10 +84,11 @@ jobs:
       - run: make check
       - run: make test
 
-      # Specification section 25.4, step 1, checked against the artifacts that will be
-      # published rather than against the sources they came from. verify-dist rejects a
-      # version that any distribution disagrees on, so lockstep and tag agreement are one
-      # assertion instead of a loop over the five pyproject files.
+      # Re-verifies section 25.4 step 1 against the artifacts that will actually be
+      # published rather than the sources they came from; the fast source-level gate is
+      # tag-guard. verify-dist rejects a version that any distribution disagrees on, so
+      # lockstep and tag agreement are one assertion instead of a loop over the five
+      # pyproject files.
       - name: Build once and verify against the tag
         run: |
           make build
@@ -135,14 +174,45 @@ jobs:
           echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           echo "PUBLIC_PACKAGES=$(make -s print-public-packages)" >> "$GITHUB_ENV"
 
-      - name: Smoke the TestPyPI publication
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: distributions
+          path: dist
+
+      # No multi-index install is deterministic here. Under uv's default first-index
+      # strategy the extra index (PyPI) has priority, so from the second release onward it
+      # already serves an older damicore and confines the first-party names to their old
+      # PyPI versions; "damicore==$VERSION", present only on TestPyPI at this point, cannot
+      # resolve. unsafe-best-match fixes that but exposes every third-party name to
+      # TestPyPI shadowing — a dry run selected a bogus python-dateutil 3.9.0 over PyPI's
+      # 2.9.x. So the install is split: third-party resolves only from PyPI, against the
+      # built wheels, and then the five first-party distributions are swapped for the
+      # TestPyPI publication, pinned and with --no-deps. That proves TestPyPI serves
+      # exactly the five tagged versions — the bytes users will fetch — and the resulting
+      # environment is what a real user's resolver produces once the PyPI publish lands.
+      # Deliberately not re-proven here: resolution purely from TestPyPI metadata.
+      # build.yml's find-links lanes and the final PyPI publication cover that.
+      - name: Resolve third-party dependencies from PyPI
         env:
           SMOKE_VENV: /tmp/damicore-release-smoke
         run: |
           uv venv "$SMOKE_VENV" --python "${{ matrix.python }}"
+          uv pip install --python "$SMOKE_VENV/bin/python" dist/*.whl
+
+      - name: Swap first-party for the TestPyPI publication
+        env:
+          SMOKE_VENV: /tmp/damicore-release-smoke
+        run: |
+          uv pip uninstall --python "$SMOKE_VENV/bin/python" \
+            $(printf -- '%s ' $PUBLIC_PACKAGES | tr '_' '-')
           uv pip install --python "$SMOKE_VENV/bin/python" \
-            --index-url https://test.pypi.org/simple \
-            --extra-index-url https://pypi.org/simple "damicore==$VERSION"
+            --index-url https://test.pypi.org/simple --no-deps \
+            $(printf -- "%s==$VERSION " $PUBLIC_PACKAGES | tr '_' '-')
+
+      - name: Smoke the TestPyPI publication
+        env:
+          SMOKE_VENV: /tmp/damicore-release-smoke
+        run: |
           "$SMOKE_VENV/bin/damicore" --help
           "$SMOKE_VENV/bin/python" .github/scripts/wheel_smoke.py \
             --pipeline $(printf -- '--package %s ' $PUBLIC_PACKAGES)
