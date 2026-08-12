@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "archer": {
+      "source": "TriangulosTecnologia/devanity-skills",
+      "sourceType": "github",
+      "skillPath": "skills/archer/SKILL.md",
+      "computedHash": "bf0388159e415545463acb3837db957635b44bb606934097c2d9dc454b952d96"
+    },
+    "guardian": {
+      "source": "TriangulosTecnologia/devanity-skills",
+      "sourceType": "github",
+      "skillPath": "skills/guardian/SKILL.md",
+      "computedHash": "129779876a0aed63835362ea55c88dc8f95a395afe40a31a273db6e584f776de"
+    },
+    "maestro": {
+      "source": "TriangulosTecnologia/devanity-skills",
+      "sourceType": "github",
+      "skillPath": "skills/maestro/SKILL.md",
+      "computedHash": "eeb5c556506698b8900e06ee71164ce0c578557d40e0a4a3b578209b6cb887a7"
+    }
+  }
+}
