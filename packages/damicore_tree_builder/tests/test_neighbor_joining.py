@@ -1,7 +1,10 @@
 import json
+import os
+import random
 from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
+from typing import IO, Any
 
 import numpy as np
 import numpy.typing as npt
@@ -9,9 +12,16 @@ import pytest
 
 import damicore_tree_builder.api as api
 import damicore_tree_builder.artifacts as artifacts
-from damicore_tree_builder import Tree, TreeBuilderError, build_tree, neighbor_joining
+from damicore_tree_builder import (
+    Tree,
+    TreeBuilderError,
+    TreeEdge,
+    TreeNode,
+    build_tree,
+    neighbor_joining,
+)
 from damicore_tree_builder.neighbor_joining import build_neighbor_joining
-from damicore_tree_builder.newick import to_newick
+from damicore_tree_builder.newick import _escape, to_newick
 
 pytestmark = pytest.mark.unit
 
@@ -442,3 +452,201 @@ def test_identifiers_with_underscores_are_quoted() -> None:
     assert "'nj_root'" in newick
     # A label with no character needing an escape stays bare.
     assert "obj:" in newick and "'obj'" not in newick
+
+
+def _ladder(depth: int) -> Tree:
+    """A caterpillar of nesting depth `depth`: each internal node holds a leaf and the next.
+
+    Neighbor Joining produces exactly this shape whenever a single taxon joins per round, so
+    tree depth tracks the object count instead of its logarithm.
+    """
+    nodes = [TreeNode(id="nj_root", kind="internal")]
+    edges: list[TreeEdge] = []
+    for level in range(depth):
+        parent = "nj_root" if level == 0 else f"internal_{level}"
+        leaf = f"leaf_{level}"
+        child = f"internal_{level + 1}"
+        nodes.append(TreeNode(id=leaf, kind="leaf", label=leaf))
+        nodes.append(TreeNode(id=child, kind="internal"))
+        edges.append(TreeEdge(source=parent, target=leaf, length=0.5))
+        edges.append(TreeEdge(source=parent, target=child, length=0.25))
+    last = f"leaf_{depth}"
+    nodes.append(TreeNode(id=last, kind="leaf", label=last))
+    edges.append(TreeEdge(source=f"internal_{depth}", target=last, length=0.5))
+    return Tree(root_id="nj_root", nodes=tuple(nodes), edges=tuple(edges))
+
+
+def _random_tree(seed: int, size: int = 40) -> Tree:
+    """Grow a rooted tree by attaching each new node to an arbitrary existing one."""
+    rng = random.Random(seed)
+    names = ["nj_root"]
+    edges: list[TreeEdge] = []
+    for index in range(size):
+        parent = rng.choice(names)
+        node_id = rng.choice(["obj", "col_", "a;b", "x y", "q'z"]) + str(index)
+        names.append(node_id)
+        edges.append(TreeEdge(source=parent, target=node_id, length=rng.uniform(-1.0, 5.0)))
+    with_children = {edge.source for edge in edges}
+    return Tree(
+        root_id="nj_root",
+        nodes=tuple(
+            TreeNode(
+                id=name,
+                kind="internal" if name in with_children else "leaf",
+                label=None if name in with_children else name,
+            )
+            for name in names
+        ),
+        edges=tuple(edges),
+    )
+
+
+def _reference_newick(tree: Tree) -> str:
+    """The recursive renderer, kept here as the byte-for-byte oracle for the iterative one."""
+    children: dict[str, list[tuple[str, float]]] = {}
+    for edge in tree.edges:
+        children.setdefault(edge.source, []).append((edge.target, edge.length))
+
+    def render(node_id: str, length: float | None = None) -> str:
+        descendants = sorted(children.get(node_id, []), key=lambda item: item[0])
+        prefix = ""
+        if descendants:
+            prefix = "(" + ",".join(render(child, branch) for child, branch in descendants) + ")"
+        value = prefix + _escape(node_id)
+        if length is not None:
+            value += ":" + repr(float(length))
+        return value
+
+    return render(tree.root_id) + ";"
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3, 4, 5, 6, 7])
+def test_iterative_rendering_is_byte_identical_to_the_recursive_reference(seed: int) -> None:
+    """The renderer stopped recursing to survive deep trees; the string it emits is a
+    published artifact, so the change has to be provably invisible in the output."""
+    tree = _random_tree(seed)
+    assert to_newick(tree) == _reference_newick(tree)
+
+
+def test_a_tree_deeper_than_the_recursion_limit_is_rendered() -> None:
+    """601 leaves is well inside the supported object count, and a renderer spending a stack
+    frame per level fails on it."""
+    newick = to_newick(_ladder(600))
+    assert newick.endswith(";")
+    assert newick.count("'leaf_") == 601
+    # One parenthesised group per internal node: the root plus one per ladder rung.
+    assert newick.count("(") == 601
+    assert newick.count(")") == 601
+
+
+def test_a_shallow_ladder_renders_the_expected_nesting() -> None:
+    """Pins the shape the deep case can only assert by counting."""
+    assert to_newick(_ladder(2)) == (
+        "((('leaf_2':0.5)'internal_2':0.25,'leaf_1':0.5)'internal_1':0.25,'leaf_0':0.5)'nj_root';"
+    )
+
+
+def test_a_cycle_in_the_edges_is_rejected_rather_than_looping() -> None:
+    """An iterative traversal has no stack limit to end a cycle for it, so it must detect one:
+    the recursive renderer failed loudly here and a silent hang would be worse."""
+    tree = Tree(
+        root_id="nj_root",
+        nodes=(TreeNode(id="nj_root", kind="internal"), TreeNode(id="a", kind="internal")),
+        edges=(
+            TreeEdge(source="nj_root", target="a", length=1.0),
+            TreeEdge(source="a", target="nj_root", length=1.0),
+        ),
+    )
+    with pytest.raises(TreeBuilderError, match="cycle") as raised:
+        to_newick(tree)
+    assert raised.value.code == "artifact_validation_error"
+
+
+@pytest.mark.parametrize(
+    "failing_rename",
+    [pytest.param(1, id="tree-json"), pytest.param(2, id="tree-nwk")],
+)
+def test_a_failed_artifact_rename_leaves_the_directory_as_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing_rename: int
+) -> None:
+    matrix_path, labels_path = _artifacts(tmp_path, ["a", "b", "c"])
+    renames = 0
+    real_replace = os.replace
+
+    def counting_replace(src: object, dst: object) -> None:
+        nonlocal renames
+        renames += 1
+        if renames == failing_rename:
+            raise OSError("simulated failure while committing an artifact")
+        real_replace(src, dst)  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(artifacts.os, "replace", counting_replace)
+    output = tmp_path / "out"
+    with pytest.raises(OSError):
+        build_tree(matrix_path, labels_path, output)
+
+    assert not list(output.glob(".tree.*"))
+    # Neither artifact may survive a partial write: the next run refuses a directory holding
+    # either one, so a stranded tree.json would need manual cleanup to recover from.
+    assert not (output / "tree.json").exists()
+    assert not (output / "tree.nwk").exists()
+    # The scratch matrix is the same problem one file over: it is not refused by the next run,
+    # but it is a full n-by-n float64 copy left in a directory the user owns.
+    assert not (output / "tree-work.npy").exists()
+
+
+def test_a_failure_before_the_artifacts_still_clears_the_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    matrix_path, labels_path = _artifacts(tmp_path, ["a", "b", "c"])
+
+    def failing_build(*args: object, **kwargs: object) -> Tree:
+        raise OSError("simulated failure while joining")
+
+    monkeypatch.setattr(api, "build_neighbor_joining", failing_build)
+    output = tmp_path / "out"
+    with pytest.raises(OSError):
+        build_tree(matrix_path, labels_path, output)
+    assert not (output / "tree-work.npy").exists()
+
+
+def test_a_semicolon_inside_a_label_survives_the_persisted_artifact_check(tmp_path: Path) -> None:
+    """The check counted semicolons in the rendered string, which rejected the quoted labels
+    this package itself escapes."""
+    matrix_path, labels_path = _artifacts(tmp_path, ["a;b", "c;d", "e"])
+    result = build_tree(matrix_path, labels_path, tmp_path / "out")
+    newick = result.newick_path.read_text(encoding="utf-8")
+    assert "'a;b'" in newick
+    assert newick.rstrip("\n").endswith(";")
+
+
+# Staging happens before either rename, so a failure there must also leave nothing behind.
+# The index selects which staged write fails: 1 is tree.json, 2 is tree.nwk.
+@pytest.mark.parametrize(
+    "failing_write",
+    [pytest.param(1, id="staging-tree-json"), pytest.param(2, id="staging-tree-nwk")],
+)
+def test_a_failed_staged_write_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing_write: int
+) -> None:
+    matrix_path, labels_path = _artifacts(tmp_path, ["a", "b", "c"])
+    writes = 0
+    real_fdopen = os.fdopen
+
+    def counting_fdopen(descriptor: int, mode: str = "r", **kwargs: Any) -> IO[Any]:
+        nonlocal writes
+        writes += 1
+        if writes == failing_write:
+            os.close(descriptor)
+            raise OSError("simulated failure while staging an artifact")
+        return real_fdopen(descriptor, mode, **kwargs)
+
+    monkeypatch.setattr(artifacts.os, "fdopen", counting_fdopen)
+    output = tmp_path / "out"
+    with pytest.raises(OSError, match="simulated failure while staging an artifact"):
+        build_tree(matrix_path, labels_path, output)
+
+    assert not list(output.glob(".tree.*"))
+    assert not (output / "tree.json").exists()
+    assert not (output / "tree.nwk").exists()
+    assert not (output / "tree-work.npy").exists()

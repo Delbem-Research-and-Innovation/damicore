@@ -71,29 +71,42 @@ def build_tree(
     workspace = np.lib.format.open_memmap(
         workspace_path, mode="w+", dtype=np.float64, shape=original.shape
     )
-    for start in range(0, original.shape[0], settings.q_block_size):
-        stop = min(start + settings.q_block_size, original.shape[0])
-        workspace[start:stop] = original[start:stop]
-    workspace.flush()
-    tree = build_neighbor_joining(
-        workspace,
-        labels,
-        display_labels,
-        q_block_size=settings.q_block_size,
-    )
-    tree_path, newick_path = write_tree_artifacts(tree, destination)
-    validated = Tree.model_validate_json(tree_path.read_text(encoding="utf-8"))
-    if len([node for node in validated.nodes if node.kind == "leaf"]) != len(labels):
-        raise TreeBuilderError("Persisted tree lost leaves", code="artifact_validation_error")
-    newick = newick_path.read_text(encoding="utf-8")
-    if not newick.rstrip("\n").endswith(";") or newick.count(";") != 1:
-        raise TreeBuilderError(
-            "Persisted Newick artifact is malformed",
-            code="artifact_validation_error",
+    try:
+        for start in range(0, original.shape[0], settings.q_block_size):
+            stop = min(start + settings.q_block_size, original.shape[0])
+            workspace[start:stop] = original[start:stop]
+        workspace.flush()
+        tree = build_neighbor_joining(
+            workspace,
+            labels,
+            display_labels,
+            q_block_size=settings.q_block_size,
         )
-    negative = sum(edge.length < 0 for edge in tree.edges)
-    del workspace
-    workspace_path.unlink()
+        tree_path, newick_path = write_tree_artifacts(tree, destination)
+        try:
+            validated = Tree.model_validate_json(tree_path.read_text(encoding="utf-8"))
+            if len([node for node in validated.nodes if node.kind == "leaf"]) != len(labels):
+                raise TreeBuilderError(
+                    "Persisted tree lost leaves", code="artifact_validation_error"
+                )
+            newick = newick_path.read_text(encoding="utf-8")
+            # Only the terminator is checked. A semicolon inside a quoted label is data, so
+            # counting them rejects valid output this package itself produces.
+            if not newick.rstrip("\n").endswith(";"):
+                raise TreeBuilderError(
+                    "Persisted Newick artifact is malformed",
+                    code="artifact_validation_error",
+                )
+        except BaseException:
+            # The next run refuses a directory holding either artifact, so a rejected write
+            # must not survive as a file that only manual cleanup can clear.
+            tree_path.unlink(missing_ok=True)
+            newick_path.unlink(missing_ok=True)
+            raise
+        negative = sum(edge.length < 0 for edge in tree.edges)
+    finally:
+        del workspace
+        workspace_path.unlink(missing_ok=True)
     return TreeBuildResult(
         tree_path=tree_path,
         newick_path=newick_path,
