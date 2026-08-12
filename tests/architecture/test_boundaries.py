@@ -209,13 +209,16 @@ def test_public_pyprojects_contain_no_workspace_paths_or_typer() -> None:
 # fields are also the only ones nothing else in the repository reads, so without this they are
 # unverified by construction. The assertions are about presence and shape, never the text of a
 # field, so ordinary editing stays free.
-REQUIRED_URLS = frozenset({"Homepage", "Repository", "Issues", "Changelog"})
+REQUIRED_URLS = frozenset(
+    {"Homepage", "Repository", "Issues", "Documentation", "Changelog"}
+)
 SHARED_CLASSIFIERS = frozenset(
     {
         "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3 :: Only",
         "Topic :: Scientific/Engineering :: Information Analysis",
         "Typing :: Typed",
     }
