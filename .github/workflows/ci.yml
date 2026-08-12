@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Specification section 25.1, jobs 1 to 3. Lint and types are interpreter-independent:
+  # Lint and types are interpreter-independent:
   # pyrightconfig.json pins pythonVersion, so running these once is the whole signal.
   gate:
     runs-on: ubuntu-24.04
@@ -27,7 +27,7 @@ jobs:
       - uses: ./.github/actions/uv-workspace
       - run: make check
 
-  # Specification section 25.1, jobs 4 and 6. `make test` runs the whole suite, so the
+  # `make test` runs the whole suite, so the
   # import-architecture tests are covered on every interpreter rather than once.
   test:
     runs-on: ubuntu-24.04
@@ -45,11 +45,26 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: make test
 
-  # Specification section 25.1, job 5. Resolves the floor of every declared range, so it
-  # must not install from the committed lock.
+  # Resolves the floor of every declared range -- the workspace packages' runtime ranges and
+  # the dev group's -- so it must not install from the committed lock.
+  #
+  # The mode is set for the whole job instead of on `uv lock` alone because uv records it
+  # in the lockfile and discards a lock resolved under a different one -- "Ignoring existing
+  # lockfile due to change in resolution mode: `lowest-direct` vs. `highest`". A bare
+  # `uv sync` or `uv run` therefore threw the floors away and silently reinstalled the
+  # newest versions, which is how this lane came to assert nothing.
+  #
+  # `lowest` cannot replace `lowest-direct`: it floors undeclared transitive dependencies
+  # too, and resolution then fails building pyparsing 1.4.6, a Python 2 release. Floors
+  # this repository does not declare are not this gate's contract anyway.
+  #
+  # 3.11 is the only interpreter it can use: numpy 1.26 publishes no wheel for 3.13+, so a
+  # newer one would force a source build that fails on a missing BLAS.
   minimum-versions:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      UV_RESOLUTION: lowest-direct
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -58,11 +73,14 @@ jobs:
         with:
           python-version: "3.11"
           sync: none
-      - run: uv lock --resolution lowest-direct
+      - run: uv lock
       - run: uv sync --all-packages --group dev
+      # A floor nobody can read in the log is a floor nobody notices drifting.
+      - name: Record the resolved floors
+        run: uv pip list
       - run: uv run pytest -m "not slow"
 
-  # Specification sections 24.3 and 25.1, job 7. The notebook must execute cell by cell in
+  # The notebook must execute cell by cell in
   # a kernel that only knows the built wheels, so a missing dependency or a broken public
   # symbol fails here rather than for a Colab user.
   notebook:
