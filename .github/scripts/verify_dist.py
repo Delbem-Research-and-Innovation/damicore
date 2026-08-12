@@ -1,7 +1,7 @@
 """Verify built distributions before they are smoke-tested or published.
 
-Enforces the distribution contract of specification sections 8.6, 25.2 and 26 against the
-artifacts that will actually be uploaded, rather than against the sources they came from:
+Enforces the distribution contract against the artifacts that will actually be uploaded,
+rather than against the sources they came from:
 
 - the distribution directory holds exactly one wheel and one sdist per allowlisted
   package and nothing else, so a private or stale artifact cannot reach an index;
@@ -10,6 +10,8 @@ artifacts that will actually be uploaded, rather than against the sources they c
   path cannot leak into a published dependency;
 - every distribution declares the same lockstep version, optionally equal to a release
   tag;
+- every wheel that advertises ``Typing :: Typed`` actually carries the ``py.typed`` marker
+  that makes the claim true, and carries its licence text;
 - rebuilding yields byte-identical archive members, ignoring the ZIP container metadata
   that no build backend can hold stable.
 
@@ -146,6 +148,36 @@ def check_distribution(path: Path, metadata: Message) -> Iterator[str]:
             yield f"{path.name}: Requires-Dist {requirement!r} contains {marker!r}"
 
 
+def check_wheel_advertises_only_what_it_ships(
+    path: Path, metadata: Message
+) -> Iterator[str]:
+    """Yield a failure when a wheel's metadata claims something its members do not deliver.
+
+    ``Typing :: Typed`` and ``License-Expression`` are claims PyPI renders and type checkers
+    act on, and both are frozen the moment a version is uploaded. The source tree is checked
+    separately; this checks the archive, because only a build backend decides what a wheel
+    finally contains.
+    """
+    with ZipFile(path) as archive:
+        members = archive.namelist()
+    packages = {
+        name.split("/")[0]
+        for name in members
+        if "/" in name and ".dist-info/" not in name
+    }
+    if "Typing :: Typed" in metadata.get_all("Classifier", []):
+        for package in sorted(packages):
+            if f"{package}/py.typed" not in members:
+                yield f"{path.name}: declares Typing :: Typed but ships no {package}/py.typed"
+    if not metadata.get("License-Expression"):
+        yield f"{path.name}: metadata carries no License-Expression"
+    if not any(
+        name.startswith(f"{path.name.split('-')[0]}") and "/licenses/" in name
+        for name in members
+    ):
+        yield f"{path.name}: ships no licence file in .dist-info/licenses/"
+
+
 def check_lockstep_version(
     versions: dict[str, str], expected: str | None
 ) -> Iterator[str]:
@@ -212,6 +244,7 @@ def main() -> int:
     for path in sorted(arguments.dist.iterdir()):
         if path.name.endswith(".whl"):
             metadata = wheel_metadata(path)
+            failures.extend(check_wheel_advertises_only_what_it_ships(path, metadata))
         elif path.name.endswith(".tar.gz"):
             metadata = sdist_metadata(path)
         else:
