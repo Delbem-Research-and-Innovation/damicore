@@ -241,7 +241,14 @@ def main(argv: list[str] | None = None) -> int:
     except BrokenPipeError:
         # `damicore estimate --json input.csv | head` closes stdout as soon as it has enough,
         # which is ordinary shell usage rather than a failure of ours. 141 is the shell's
-        # convention for death by SIGPIPE.
+        # convention for death by SIGPIPE. Redirect stdout to devnull to suppress the
+        # "Exception ignored" message that Python prints during cleanup when the pipe is broken.
+        import os
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except (AttributeError, OSError):
+            # stdout may not have a fileno (e.g., mocked in tests) or os.devnull may fail
+            pass
         return 141
     except DamicoreError as error:
         print(json.dumps({"code": error.code, "message": str(error)}), file=sys.stderr)

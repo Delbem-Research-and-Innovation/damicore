@@ -152,8 +152,7 @@ def test_version_reports_the_installed_distribution(capsys: pytest.CaptureFixtur
 def test_a_closed_output_pipe_exits_without_a_traceback(tmp_path: Path) -> None:
     """`damicore estimate --json input.csv | head` closes stdout as soon as it has enough. The
     reader is closed here before any write, so the failure is deterministic rather than a race
-    against the pipe buffer. Exit codes vary by OS/environment, so we accept the family of codes
-    that indicate clean pipe handling (120, 141) along with successful exit (0).
+    against the pipe buffer.
     """
     source = _csv(tmp_path)
     read_end, write_end = os.pipe()
@@ -165,9 +164,7 @@ def test_a_closed_output_pipe_exits_without_a_traceback(tmp_path: Path) -> None:
     os.close(write_end)
     os.close(read_end)
     _, captured = process.communicate(timeout=120)
-    # The core requirement: process exits cleanly without traceback, regardless of exit code.
-    # The in-process test verifies the BrokenPipeError handler returns 141.
-    assert process.returncode in (0, 120, 141), f"unexpected exit code: {process.returncode}"
+    assert process.returncode == 141
     assert b"Traceback" not in captured
     assert b"Exception ignored" not in captured
 
