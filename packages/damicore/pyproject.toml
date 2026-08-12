@@ -30,9 +30,6 @@ dependencies = [
     "tqdm>=4.66,<5",
 ]
 
-[tool.uv]
-package = true
-
 [project.scripts]
 damicore = "damicore.cli:main"
 

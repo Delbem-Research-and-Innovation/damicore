@@ -22,9 +22,6 @@ classifiers = [
 keywords = ["damicore", "neighbor-joining", "phylogenetics", "tree", "newick"]
 dependencies = ["numpy>=1.26,<3", "pydantic>=2.10,<3"]
 
-[tool.uv]
-package = true
-
 [project.urls]
 Homepage = "https://github.com/Delbem-Research-and-Innovation/damicore"
 Repository = "https://github.com/Delbem-Research-and-Innovation/damicore"

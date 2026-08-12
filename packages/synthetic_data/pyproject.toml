@@ -17,9 +17,6 @@ classifiers = [
 ]
 dependencies = []
 
-[tool.uv]
-package = true
-
 [build-system]
 requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
