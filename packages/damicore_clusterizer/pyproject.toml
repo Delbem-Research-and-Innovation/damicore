@@ -29,7 +29,7 @@ Issues = "https://github.com/Delbem-Research-and-Innovation/damicore/issues"
 Changelog = "https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/CHANGELOG.md"
 
 [build-system]
-requires = ["hatchling>=1.27,<2"]
+requires = ["hatchling>=1.31.0,<2"]
 build-backend = "hatchling.build"
 
 [tool.ruff]
