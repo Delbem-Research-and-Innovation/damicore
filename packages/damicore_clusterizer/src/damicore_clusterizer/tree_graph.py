@@ -44,7 +44,53 @@ class GraphInput:
     vertex_names: tuple[str, ...]
     object_ids: tuple[str, ...]
     labels: dict[str, str]
-    shift: float
+
+
+def _edge_weights(lengths: list[float]) -> list[float]:
+    """Map branch lengths onto the strictly positive edge weights FastGreedy is given.
+
+    A shorter branch joins a closer pair, so the weight is the reciprocal of the length. The
+    reciprocals are then translated so the smallest is exactly one, and that translation is
+    the point of this function: modularity is a weighted sum, so a single unbounded weight
+    would decide the partition by itself, and a reciprocal is unbounded as the length
+    approaches zero. Translating here rather than on the lengths keeps the ratio between
+    weights bounded by the spread of the data.
+
+    It also settles what a negative branch means. Neighbor Joining emits one where the matrix
+    contradicts the split it is making, and the reciprocal of a negative length sorts below
+    every positive one, so such a branch becomes the weakest edge rather than the strongest.
+
+    The result is at least one everywhere and is unchanged by rescaling every length.
+
+    Raises
+    ------
+    ClusterizerError
+        If a length is zero, which has no reciprocal, or so small that its reciprocal
+        overflows. Neither is repaired here: a repair would be the unbounded weight this
+        function exists to avoid.
+    """
+    reciprocals: list[float] = []
+    for length in lengths:
+        if length == 0.0:
+            raise ClusterizerError(
+                "Branch length is zero and has no reciprocal weight",
+                code="tree_format_error",
+            )
+        value = 1.0 / length
+        if not math.isfinite(value):
+            raise ClusterizerError(
+                "Branch length is too small to carry a finite weight",
+                code="tree_format_error",
+            )
+        reciprocals.append(value)
+
+    mean = sum(reciprocals) / len(reciprocals)
+    deviation = math.sqrt(sum((value - mean) ** 2 for value in reciprocals) / len(reciprocals))
+    if deviation == 0.0:
+        # Every branch has the same length, so the reciprocals carry no ordering to spread.
+        return [1.0] * len(reciprocals)
+    lowest = min(reciprocals)
+    return [1.0 + (value - lowest) / deviation for value in reciprocals]
 
 
 def _load_tree_graph(path: Path) -> GraphInput:
@@ -99,22 +145,16 @@ def _load_tree_graph(path: Path) -> GraphInput:
         raise ClusterizerError("Branch lengths must be finite", code="tree_format_error")
     if len(graph_edges) != len(retained_nodes) - 1:
         raise ClusterizerError("Unrooted tree must have n-1 edges", code="tree_format_error")
-    minimum = min(lengths)
-    shift = -minimum + 1e-12 if minimum <= 0 else 0.0
-    adjusted = [length + shift for length in lengths]
-    if any(not math.isfinite(length) or length <= 0 for length in adjusted):
-        raise ClusterizerError("Adjusted branch lengths must be positive", code="tree_format_error")
     graph = ig.Graph(n=len(retained_nodes), edges=graph_edges, directed=False)
     if not graph.is_connected():
         raise ClusterizerError("Tree graph is disconnected", code="tree_format_error")
     graph.vs["name"] = retained_nodes
-    graph.es["weight"] = [1.0 / length for length in adjusted]
+    graph.es["weight"] = _edge_weights(lengths)
     return GraphInput(
         graph=graph,
         vertex_names=tuple(retained_nodes),
         object_ids=leaves,
         labels=labels,
-        shift=shift,
     )
 
 

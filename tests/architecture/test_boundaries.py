@@ -165,7 +165,6 @@ def test_public_result_models_declare_the_specified_fields() -> None:
         "ncd_max",
         "ncd_out_of_range_count",
         "negative_branch_count",
-        "branch_length_shift",
         "modularity",
         "timings_seconds",
         "verification",

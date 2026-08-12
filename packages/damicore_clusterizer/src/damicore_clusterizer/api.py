@@ -65,6 +65,5 @@ def cluster_tree(
         community_count=community_count,
         cluster_count=len(ordered_groups),
         modularity=modularity,
-        branch_length_shift=source.shift,
         timing=time.monotonic() - started,
     )

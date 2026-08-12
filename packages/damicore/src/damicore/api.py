@@ -716,7 +716,6 @@ def run(
                 community_count=int(metrics["community_count"]),
                 cluster_count=int(metrics["cluster_count"]),
                 modularity=float(metrics["modularity"]),
-                branch_length_shift=float(metrics["branch_length_shift"]),
                 timing=_stage_seconds(journal, "clusterizing"),
             )
         else:
@@ -733,7 +732,6 @@ def run(
                     "community_count": clustered.community_count,
                     "cluster_count": clustered.cluster_count,
                     "modularity": clustered.modularity,
-                    "branch_length_shift": clustered.branch_length_shift,
                 },
             )
 
@@ -771,7 +769,6 @@ def run(
             ncd_max=ncd_max,
             ncd_out_of_range_count=out_of_range,
             negative_branch_count=tree.negative_branch_count,
-            branch_length_shift=clustered.branch_length_shift,
             modularity=clustered.modularity,
             timings_seconds=timings,
             verification=verification,
