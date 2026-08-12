@@ -1,7 +1,16 @@
 # damicore-tree-builder
 
-Build a deterministic Neighbor Joining tree from `distance.npy` and
-`labels.json`.
+damicore-tree-builder builds a deterministic Neighbor Joining tree from a
+distance matrix and its labels. It is the third stage of the DAMICORE pipeline;
+most users install the aggregate `damicore` distribution, which runs all four
+stages end to end. Install this package alone to build trees without the rest of
+the pipeline.
+
+```bash
+pip install damicore-tree-builder
+```
+
+## Python
 
 ```python
 from damicore_tree_builder import build_tree
@@ -9,7 +18,18 @@ from damicore_tree_builder import build_tree
 result = build_tree("distance.npy", "labels.json", "run")
 ```
 
-The path API copies into a temporary memory map, reuses slots, evaluates Q
-pairwise without materializing it, preserves negative branches, and writes
-`tree.json` plus Newick. `neighbor_joining(matrix, labels)` is available for
-small matrices.
+`distance.npy` and `labels.json` are produced by the sibling `damicore-distance`
+distribution; the call writes `tree.json` plus Newick, and `tree.json` is the
+input the sibling `damicore-clusterizer` distribution consumes. The path API
+copies into a temporary memory map, reuses slots, evaluates Q pairwise without
+materializing it, and preserves negative branches. `neighbor_joining(matrix,
+labels)` is available for small in-memory matrices.
+
+## Links
+
+- Repository: <https://github.com/Delbem-Research-and-Innovation/damicore>
+- Issues: <https://github.com/Delbem-Research-and-Innovation/damicore/issues>
+- Documentation:
+  <https://github.com/Delbem-Research-and-Innovation/damicore/blob/main/docs/quickstart.md>
+
+Licensed under Apache-2.0.
