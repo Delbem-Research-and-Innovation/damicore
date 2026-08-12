@@ -25,14 +25,16 @@ def cluster_tree(
     be lower than ``community_count``. Cluster numbers are assigned by sorting the groups by
     their object ids, so the numbering depends on the tree rather than on FastGreedy's
     internal ordering. Writes ``membership.csv`` and ``clusters.json`` into ``output_dir``;
-    both must be absent, since neither is overwritten.
+    both must be absent, since neither is overwritten. ``output_dir`` is created before that
+    check, so a call rejected for the conflict still leaves the directory behind.
 
     Raises
     ------
     ClusterizerError
         ``config.num_clusters`` exceeds the leaf count (``configuration_error``); the tree
-        artifact is missing, unparsable, or not a valid unrooted binary tree
-        (``tree_format_error``); the resulting communities do not cover every leaf
+        artifact is missing, unparsable, not a valid unrooted binary tree, or carries a branch
+        length of zero or too small for a finite reciprocal weight (``tree_format_error``);
+        the resulting communities do not cover every leaf
         (``clusterization_error``); the outputs already exist
         (``output_directory_conflict_error``).
     """

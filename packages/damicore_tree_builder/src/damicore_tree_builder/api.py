@@ -52,14 +52,16 @@ def build_tree(
 
     Takes ``distance.npy`` and ``labels.json`` as the distance stage writes them, and writes
     ``tree.json`` and ``tree.nwk`` into ``output_dir``; both must be absent, since a tree is
-    never overwritten. Joining runs against a private ``tree-work.npy`` memory map inside
-    ``output_dir``, so the input matrix is left untouched and peak RAM does not grow with the
-    matrix; that workspace is removed on every exit path. The two artifacts are re-read and
-    validated after writing, and deleted again if that fails, so a rejected tree never
-    survives to block the next run. Ties in the Q criterion are broken by label order, which
-    makes the output a function of the matrix and its labels alone. Negative branch lengths
-    are reported in the result, never clamped. ``tree.json`` is the input
-    :func:`damicore_clusterizer.cluster_tree` expects.
+    never overwritten. ``output_dir`` is created before that check, so even a rejected call
+    leaves the directory behind. Joining runs against a private ``tree-work.npy`` memory map
+    inside ``output_dir``, so the input matrix is left untouched and peak RAM does not grow
+    with the matrix; once that workspace exists it is removed on every exit path, but a
+    failure while creating it, a full disk being the realistic one, can leave it behind. The
+    two artifacts are re-read and validated after writing, and deleted again if that fails, so
+    a rejected tree never survives to block the next run. Ties in the Q criterion are broken
+    by label order, which makes the output a function of the matrix and its labels alone.
+    Negative branch lengths are reported in the result, never clamped. ``tree.json`` is the
+    input :func:`damicore_clusterizer.cluster_tree` expects.
 
     Raises
     ------

@@ -505,9 +505,11 @@ def run(
     exception propagates, so the partial state stays diagnosable and, where the checkpoints
     allow it, resumable.
 
-    Unless ``execution.workers`` is ``1``, the distance stage spawns worker processes that
-    re-import the calling module. A call at module level in a ``.py`` script must therefore
-    sit under ``if __name__ == "__main__":``; a notebook or REPL already satisfies this.
+    The distance stage spawns worker processes, which re-import the calling module, whenever
+    ``execution.workers`` resolves above ``1``; ``"auto"`` resolves from the CPU count, so
+    only an explicit ``workers=1`` rules the pool out. A call at module level in a ``.py``
+    script must therefore sit under ``if __name__ == "__main__":``; a notebook or REPL already
+    satisfies this.
 
     Parameters
     ----------
@@ -566,9 +568,12 @@ def run(
     DistanceComputationError
         The NCD stage failed, including a worker pool that died.
     DistanceMatrixValidationError
-        The computed matrix is not finite, zero-diagonal, and symmetric.
+        The NCD stage's own check found the computed matrix not finite, zero-diagonal, and
+        symmetric.
     NormalizationError, TreeBuildError, TreeFormatError, ClusterizationError
-        The corresponding stage failed with no more specific cause.
+        The corresponding stage failed with no more specific cause. ``TreeBuildError`` also
+        covers the tree stage rejecting the matrix it was given, which does not surface as
+        ``DistanceMatrixValidationError``.
     ArtifactValidationError
         An artifact failed its schema, its recorded hash or size, path containment, or the
         cross-artifact verification.
