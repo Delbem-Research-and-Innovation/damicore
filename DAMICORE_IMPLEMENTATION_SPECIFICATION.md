@@ -260,10 +260,11 @@ ruff = ">=0.15,<0.17"
 pyright = ">=1.1,<2"
 pandas-stubs = ">=2.2,<4"
 build = ">=1.2,<2"
-twine = ">=6,<7"
+twine = ">=7,<8"
 pip-audit = ">=2.9,<3"
 nbformat = ">=5.10,<6"
 nbclient = ">=0.10,<1"
+pre-commit = ">=4,<5"
 ~~~
 
 O CI NÃO DEVE usar tags latest. Actions, uv e ferramentas DEVEM ter versão fixada.

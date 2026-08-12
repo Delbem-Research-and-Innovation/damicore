@@ -27,7 +27,7 @@ help:
 
 install:
 	uv sync --all-packages --group dev
-	pre-commit install
+	uv run pre-commit install
 
 check:
 	uv run ruff check .
