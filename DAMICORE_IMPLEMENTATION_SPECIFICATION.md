@@ -1264,7 +1264,9 @@ Não existe lane agendada. As atualizações chegam pelo Dependabot, configurado
 
 ### 25.4 release.yml
 
-Disparo por tag vX.Y.Z. Ordem:
+Disparo por tag vX.Y.Z. A tag PODE ser criada e o workflow despachado automaticamente
+quando main passa a declarar uma versão que ainda não possui tag; o release continua
+definido pela tag e por todos os gates abaixo. Ordem:
 
 1. confirmar que versões dos cinco pacotes e tag são iguais;
 2. executar CI e build do commit da tag;

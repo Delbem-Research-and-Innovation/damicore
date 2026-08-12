@@ -6,14 +6,18 @@ facts that exist outside the repository.
 
 ## Trigger
 
-Push a tag `vX.Y.Z` on a commit that is on `main` (the wheels bake `blob/main/...`
-URLs) where `X.Y.Z` equals the version declared by all five public
-`pyproject.toml` files and `CHANGELOG.md` contains a `## X.Y.Z` heading.
+Merging to `main` releases automatically: `auto-tag.yml` sees `main` declaring a
+version with no `vX.Y.Z` tag yet, verifies it against the five public
+`pyproject.toml` files and the `## X.Y.Z` changelog heading, pushes the tag, and
+dispatches `release.yml` on it. A merge that does not change the version does
+nothing. Pushing the tag by hand still works and runs the same pipeline.
 
-To bump a version: set the five `pyproject.toml` versions, add the `## X.Y.Z`
+To release: set the five `pyproject.toml` versions, add the `## X.Y.Z`
 changelog section, run `uv sync --all-packages --group dev` so `uv.lock` records
 the new versions (every CI job installs with `--locked` and fails on a stale
-lock), and merge before tagging.
+lock), and merge. For a fully automatic flow the `release` environment must have
+no required reviewers; adding reviewers turns each publish into one approval
+click instead.
 
 ## Gate chain (`.github/workflows/release.yml`)
 

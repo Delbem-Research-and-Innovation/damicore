@@ -3,6 +3,10 @@ name: Release
 on:
   push:
     tags: ["v*.*.*"]
+  # auto-tag.yml creates the version tag with the workflow token, and tag pushes made with
+  # that token deliberately fire no workflows, so it dispatches this one on the tag ref
+  # instead. GITHUB_REF_NAME is the tag either way; every job below reads the same value.
+  workflow_dispatch:
 
 # Granted per job, never here. The token that can publish to PyPI must not be present in a
 # job that runs repository code: `make test` executes the project and its development
@@ -32,33 +36,12 @@ jobs:
           persist-credentials: false
       # The stock python3 of ubuntu-24.04 with stdlib tomllib is enough: setting up uv here
       # would cost more than the check itself. The package list comes from the same Make
-      # target the build and smoke jobs use, so the allowlist has one source of truth.
+      # target the build and smoke jobs use, and the check itself is shared with auto-tag,
+      # so both the allowlist and the guard have one source of truth.
       - name: Confirm every public package version equals the tag
         run: |
-          python3 - "${GITHUB_REF_NAME#v}" $(make -s print-public-packages) <<'EOF'
-          import sys
-          import tomllib
-
-          expected = sys.argv[1]
-          mismatches = []
-          for package in sys.argv[2:]:
-              path = f"packages/{package}/pyproject.toml"
-              with open(path, "rb") as handle:
-                  version = tomllib.load(handle)["project"]["version"]
-              if version != expected:
-                  mismatches.append(f"{path}: version {version} != tag version {expected}")
-          # The same cheap-mistake class as a version mismatch: the build job's changelog
-          # extraction requires this exact heading, and discovering its absence there costs
-          # the whole benchmark first.
-          heading = f"## {expected}\n"
-          with open("CHANGELOG.md", encoding="utf-8") as handle:
-              if heading not in handle.read():
-                  mismatches.append(f"CHANGELOG.md: no '## {expected}' section for this tag")
-          if mismatches:
-              print("\n".join(mismatches), file=sys.stderr)
-              sys.exit(1)
-          print(f"all {len(sys.argv) - 2} package versions equal tag version {expected}")
-          EOF
+          python3 .github/scripts/version_guard.py "${GITHUB_REF_NAME#v}" \
+            $(make -s print-public-packages)
 
   # Specification section 24.4: the 2 GiB resource budget is proven at the tag commit, before
   # anything irreversible is published. The object sweep is left out because it asserts no

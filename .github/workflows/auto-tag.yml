@@ -1,0 +1,50 @@
+name: Auto tag
+
+# Publishing stays tag-defined (specification section 25.4); this workflow automates only
+# the tag's creation. When main starts declaring a version that has no tag yet, it verifies
+# the version against every public package and the changelog, pushes vX.Y.Z, and dispatches
+# release.yml on that tag ref — a dispatch, because tag pushes made with the workflow token
+# deliberately fire no workflows. A merge that does not change the version finds its tag
+# already present and does nothing.
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# One merge at a time: two racing runs could both see the tag missing and collide on the
+# push. The loser of the race fails on the second push, which is the correct outcome.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      # contents to push the tag; actions to dispatch release.yml on it.
+      contents: write
+      actions: write
+    steps:
+      # The one checkout in the repository that keeps its credentials: this job exists to
+      # push a tag, and the workflow token scoped by the permissions above is exactly the
+      # credential that push should use.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: true
+
+      - name: Tag the version main declares and dispatch the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("packages/damicore/pyproject.toml", "rb"))["project"]["version"])')
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "v$version already exists; nothing to release"
+            exit 0
+          fi
+          python3 .github/scripts/version_guard.py "$version" $(make -s print-public-packages)
+          git tag "v$version"
+          git push origin "v$version"
+          gh workflow run release.yml --ref "v$version"
+          echo "tagged v$version and dispatched release.yml"
