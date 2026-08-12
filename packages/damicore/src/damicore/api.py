@@ -6,6 +6,7 @@ import json
 import logging
 import shutil
 import sys
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal
 
@@ -81,7 +82,11 @@ from damicore.progress import distance_progress
 from damicore.result import DamicoreResult, RunReport, artifact_paths
 
 SCHEMA_VERSION = 1
-VERSION = "0.1.0"
+# Read from the installed distribution rather than restated here. This value is stamped
+# into every manifest as run provenance, so a third copy of the version string could put
+# a number in an artifact that no distribution ever carried. It raises when damicore is
+# not installed, which is the honest outcome: there is no correct value to fall back to.
+VERSION = metadata.version("damicore")
 logger = logging.getLogger(__name__)
 
 # Specification section 11.3 requires ResourceLimitError itself to carry the distinction
