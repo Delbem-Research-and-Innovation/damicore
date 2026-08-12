@@ -1,23 +1,33 @@
 # Releasing DAMICORE
 
-Operational guide for maintainers. The normative release rules live in
-`DAMICORE_IMPLEMENTATION_SPECIFICATION.md`, section 25.4; this file records only the
-facts that exist outside the repository.
+The release procedure of record for maintainers. The workflows under `.github/workflows`
+execute it; this file states the procedure and the facts that live outside the repository.
+
+## Position
+
+0.1.0 is published. All five distributions are on PyPI, and `v0.1.0` is tagged. A version
+on PyPI is immutable and its number can never be reused, so the next release is a new
+version — not a rebuild of this one.
 
 ## Trigger
 
-Merging to `main` releases automatically: `auto-tag.yml` sees `main` declaring a
-version with no `vX.Y.Z` tag yet, verifies it against the five public
-`pyproject.toml` files and the `## X.Y.Z` changelog heading, pushes the tag, and
-dispatches `release.yml` on it. A merge that does not change the version does
-nothing. Pushing the tag by hand still works and runs the same pipeline.
+**Changing the version on `main` is the act that publishes.** `auto-tag.yml` fires on every
+push to `main`, and when it sees a version with no `vX.Y.Z` tag yet it verifies that version
+against the five public `pyproject.toml` files and the `## X.Y.Z` changelog heading, pushes
+the tag, and dispatches `release.yml` on it. From there the chain runs to an irreversible
+PyPI upload with no further approval inside the repository. A merge that does not change the
+version finds its tag already present and does nothing. Pushing the tag by hand runs the
+same pipeline.
 
-To release: set the five `pyproject.toml` versions, add the `## X.Y.Z`
-changelog section, run `uv sync --all-packages --group dev` so `uv.lock` records
-the new versions (every CI job installs with `--locked` and fails on a stale
-lock), and merge. For a fully automatic flow the `release-<project>`
-environments must have no required reviewers; adding reviewers turns each
-publish into approval clicks instead.
+The only gate that can stand between a merge and an upload is a required reviewer on the
+five `release-<project>` GitHub environments. That is repository settings, not a file in
+this repository, so it cannot be reviewed in a pull request — confirm it deliberately. A
+fully automatic flow needs no reviewers; adding them turns each publish into approval
+clicks, two per release per distribution.
+
+To release: set the five `pyproject.toml` versions, rename the `## Unreleased` changelog
+heading to `## X.Y.Z`, run `uv sync --all-packages --group dev` so `uv.lock` records the new
+versions (every CI job installs with `--locked` and fails on a stale lock), and merge.
 
 ## Gate chain (`.github/workflows/release.yml`)
 
@@ -72,6 +82,16 @@ Additionally:
   never replaces a file it already holds, so after the first TestPyPI publish of
   a version, its bytes there are frozen even if a re-tag rebuilt them; compare
   the TestPyPI downloads against the run's `SHA256SUMS` when in doubt.
+- **A re-run against an already-published version publishes nothing and still reports
+  success.** Every upload skips, the smoke job validates the bytes the index already held,
+  and the run goes green. A green release run is therefore not evidence that anything was
+  published — check the version on PyPI itself. This is why fixing forward means a new
+  version number, never a re-run of the old one.
+- The five distributions publish as five independent matrix legs with `fail-fast: false`,
+  so one failing leg does not stop the other four. Since `damicore` pins its four stage
+  packages within the release, a partial publish can leave an installable-looking
+  `damicore` whose dependencies are not on the index. If a leg fails, check all five names
+  on PyPI before deciding what to do next.
 - Artifacts are never rebuilt between TestPyPI and PyPI; both publish jobs upload
   the exact files the build job produced.
-- A version that reached PyPI cannot be retracted; fix forward with a new patch tag.
+- A version that reached PyPI cannot be retracted; fix forward with a new patch version.

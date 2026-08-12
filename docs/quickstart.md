@@ -1,5 +1,10 @@
 # Quickstart
 
+For a notebook — Jupyter or Colab. The cells below use `%pip` and `display`, which
+only a notebook defines. In a `.py` script use `pip install damicore`, `print`, and
+put the `run` call under `if __name__ == "__main__":`, because the default worker
+count opens a process pool whose workers re-import the calling module.
+
 ```python
 %pip install damicore
 ```
