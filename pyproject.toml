@@ -4,15 +4,15 @@ members = ["packages/*"]
 [dependency-groups]
 dev = [
     "build>=1.2,<2",
-    "hypothesis>=6,<7",
+    "hypothesis>=6.165.2,<7",
     "nbclient>=0.10,<1",
-    "nbformat>=5.10,<6",
-    "pandas-stubs>=2.2,<4",
+    "nbformat>=5.11.0,<6",
+    "pandas-stubs>=3.0.5.260730,<4",
     "pip-audit>=2.9,<3",
     "pyright>=1.1,<2",
     "pytest>=8,<10",
     "pytest-cov>=6,<8",
-    "ruff>=0.15,<0.17",
+    "ruff>=0.16.2,<0.17",
     "twine>=7,<8",
 ]
 
