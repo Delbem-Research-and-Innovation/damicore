@@ -67,8 +67,8 @@ def test_rows_use_positional_ids_and_arrays(tmp_path: Path) -> None:
 
 
 # Each row is one way the input contract can be violated: the CSV text (None for a path that
-# is not a file), the config overrides that make it a violation, the stable code from
-# specification section 19, and the message fragment separating it from the other violations
+# is not a file), the config overrides that make it a violation, the stable public code,
+# and the message fragment separating it from the other violations
 # that share that code. Adding a violation is adding a row, and it fails under its own name.
 INPUT_CONTRACT_VIOLATIONS = [
     pytest.param(
@@ -116,7 +116,7 @@ def test_scan_csv_rejects_a_missing_path_on_its_own(tmp_path: Path) -> None:
 
 
 def test_a_declared_delimiter_and_encoding_are_used_verbatim(tmp_path: Path) -> None:
-    """Specification sections 10.1 and 10.3: the declared delimiter and encoding decode the
+    """The declared delimiter and encoding decode the
     input, and the canonical object bytes are always UTF-8 JSON regardless of that encoding."""
     source = tmp_path / "latin.csv"
     source.write_bytes("nome;cidade\nJosé;Belém\n".encode("latin-1"))
@@ -131,7 +131,7 @@ def test_a_declared_delimiter_and_encoding_are_used_verbatim(tmp_path: Path) -> 
 
 
 def test_cell_text_is_preserved_and_escaped_only_by_json(tmp_path: Path) -> None:
-    """Specification section 10.3: an embedded newline, quote or non-ASCII character survives
+    """An embedded newline, quote or non-ASCII character survives
     unchanged; only the JSON representation supplies escaping."""
     source = tmp_path / "quoted.csv"
     source.write_text('text,other\n"line1\nline2","say ""hi"" ☃"\n', encoding="utf-8")
@@ -172,7 +172,7 @@ MALFORMED_INPUTS = [
 def test_malformed_input_is_rejected_as_a_csv_format_error(
     tmp_path: Path, payload: bytes, discriminator: str, chunk_rows: int
 ) -> None:
-    """Specification section 10.1: a record whose field count disagrees with the header is
+    """A record whose field count disagrees with the header is
     malformed. Accepting one would silently drop or invent cell values, because pandas reads a
     uniform surplus of leading fields as an index and pads a short row."""
     source = tmp_path / "malformed.csv"
@@ -186,7 +186,7 @@ def test_malformed_input_is_rejected_as_a_csv_format_error(
 
 
 def test_a_field_wider_than_the_csv_module_default_round_trips(tmp_path: Path) -> None:
-    """Section 10.1 sets no field-size limit, and pandas imposes none. csv's own 131072-char
+    """The CSV contract sets no field-size limit, and pandas imposes none. csv's own 131072-char
     default applies only to the validation passes, so it must not become an input restriction
     the normalizer invents: a wide cell is well-formed and its bytes must survive intact."""
     wide = "x" * 200_000
@@ -246,7 +246,7 @@ def test_a_pandas_parser_error_is_translated(
 
 
 def test_a_blank_line_is_a_full_width_empty_row(tmp_path: Path) -> None:
-    """Specification section 10.1 sets skip_blank_lines=False, so a blank line is preserved as
+    """Reading sets skip_blank_lines=False, so a blank line is preserved as
     a row of empty cells rather than being rejected as a width mismatch or skipped."""
     source = tmp_path / "blank.csv"
     source.write_text("a,b\n1,2\n\n3,4\n", encoding="utf-8")
@@ -262,7 +262,7 @@ def test_a_blank_line_is_a_full_width_empty_row(tmp_path: Path) -> None:
 def test_more_columns_than_the_open_file_limit_stay_complete(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Specification section 10.3: the LRU pool caps open handles, so a wide CSV forces
+    """The LRU pool caps open handles, so a wide CSV forces
     eviction and reopening. Every object must still contain all of its rows, in order."""
     columns = 70
     limit = 8
@@ -298,7 +298,7 @@ def test_more_columns_than_the_open_file_limit_stay_complete(
 def test_input_drift_during_normalization_is_detected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Specification section 19: input_drift is the one specialized code in v0.1 — it guards
+    """input_drift is the one specialized code in v0.1 — it guards
     against silently normalizing a CSV that changed underneath the running scan."""
     source = _csv(tmp_path)
     real_scan_csv = api.scan_csv
@@ -380,7 +380,7 @@ UNCONTAINED_PATHS = [
 
 @pytest.mark.parametrize("relative_path", UNCONTAINED_PATHS)
 def test_an_uncontained_relative_path_is_rejected(relative_path: str) -> None:
-    """Specification path-containment invariant: a manifest entry may only name a contained
+    """Path containment: a manifest entry may only name a contained
     POSIX path, so a descriptor deserialized from disk can never point outside the run."""
     with pytest.raises(ValidationError, match="contained POSIX path"):
         ObjectDescriptor(

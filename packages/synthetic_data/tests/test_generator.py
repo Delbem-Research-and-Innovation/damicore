@@ -63,8 +63,8 @@ def test_generate_csv_rejects_invalid_dimensions(
         generate_csv(tmp_path / "bad.csv", rows=rows, columns=columns, clusters=clusters, seed=1)
 
 
-# Both split modes are exercised: spec section 23 requires controllable groups of columns AND
-# of rows, and the pipeline is run over both. The standard e2e fixture shape is included.
+# Both split modes are exercised: the generator must produce controllable groups of columns
+# AND of rows, and the pipeline is run over both. The standard e2e fixture shape is included.
 @pytest.mark.parametrize(
     ("axis", "rows", "columns", "clusters"),
     [

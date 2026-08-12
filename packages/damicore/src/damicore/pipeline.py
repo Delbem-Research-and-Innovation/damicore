@@ -24,7 +24,7 @@ from damicore.manifest import (
 logger = logging.getLogger(__name__)
 
 
-# Fields whose equality is required to resume an incomplete run (specification 12.2).
+# Fields whose equality is required to resume an incomplete run.
 # Deliberately narrower than the full runtime record: environment facts such as the
 # platform string or sibling-package builds must not spuriously block a valid resume.
 RESUME_FINGERPRINT_KEYS = (

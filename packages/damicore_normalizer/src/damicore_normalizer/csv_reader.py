@@ -20,7 +20,7 @@ from damicore_normalizer.serializer import serialize_cell, serialize_row
 # A single field may be this many characters during the csv.reader passes. csv defaults to
 # 131072, which pandas does not impose, so without this a well-formed wide cell would be
 # reported as malformed. The value is a bound the C long behind field_size_limit accepts on
-# every supported platform, not a contract: section 10.1 sets no field-size limit.
+# every supported platform, not a contract: the CSV contract sets no field-size limit.
 _MAX_FIELD_CHARS = 2**31 - 1
 
 
@@ -106,7 +106,7 @@ def _validate_record_widths(path: Path, config: NormalizationConfig, width: int)
     surplus fields, the C parser reads the leading ones as an index and those cells disappear;
     when only a later row does, the surplus is dropped or reported depending on where the chunk
     boundary falls; a short row is padded with a cell the input never contained. The canonical
-    bytes would then depend on ``chunk_rows``, which section 24.1 forbids.
+    bytes would then depend on ``chunk_rows``, which determinism forbids.
 
     ``csv.reader`` agrees with pandas on record boundaries and field counts once the two are
     configured to match, so one streaming pass over the raw records makes the check total.

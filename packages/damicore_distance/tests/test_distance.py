@@ -179,7 +179,7 @@ def test_resume_after_each_shard_boundary_matches_clean_run(
     monkeypatch.setattr(distance_api, "_worker", fail_at_boundary)
     interrupted = tmp_path / f"interrupted-{fail_after}"
     # A worker failure reaches the caller as a typed error carrying the original as its cause:
-    # section 19 requires a stable code on every public failure, whatever went wrong inside.
+    # every public failure carries a stable code, whatever went wrong inside.
     with pytest.raises(DistanceError) as raised:
         compute_distance_matrix(normalized.manifest_path, interrupted, config=config)
     assert raised.value.code == "distance_computation_error"
@@ -579,7 +579,7 @@ def test_shards_are_submitted_in_a_bounded_window() -> None:
     assert submitted == list(range(total))
 
 
-# Section 19 requires a stable code on every public failure. A worker dies as BrokenProcessPool
+# Every public failure must carry a stable code. A worker dies as BrokenProcessPool
 # with no cause attached, and any other worker exception arrives as whatever type it was.
 def _raising(exc: BaseException) -> Iterator[distance_api.WorkerResult]:
     def generate() -> Iterator[distance_api.WorkerResult]:
@@ -622,8 +622,8 @@ def test_a_typed_worker_error_passes_through_unchanged() -> None:
 def test_a_pandas_view_without_the_extra_names_the_extra_to_install(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method_name: str
 ) -> None:
-    """Section 9.3 keeps both methods on the view while pandas stays optional, so their
-    failure has to be the package's own typed error rather than ModuleNotFoundError."""
+    """Both methods stay on the public view while pandas stays optional, so their failure
+    has to be the package's own typed error rather than ModuleNotFoundError."""
     path = tmp_path / "distance.npy"
     np.save(path, np.zeros((2, 2), dtype=np.float64), allow_pickle=False)  # pyright: ignore[reportUnknownMemberType]
     view = DistanceMatrixView(path, ["a", "b"])

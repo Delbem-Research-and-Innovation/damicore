@@ -21,7 +21,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 keywords = ["damicore", "clustering", "community-detection", "fastgreedy", "modularity"]
-dependencies = ["igraph>=1.0,<1.1", "numpy>=1.26,<3", "pydantic>=2.10,<3"]
+dependencies = ["igraph>=1.0,<1.1", "pydantic>=2.10,<3"]
 
 [project.urls]
 Homepage = "https://github.com/Delbem-Research-and-Innovation/damicore"

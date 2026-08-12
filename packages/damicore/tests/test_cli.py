@@ -46,7 +46,7 @@ def test_cli_run_and_typed_error_codes(tmp_path: Path, capsys: pytest.CaptureFix
         )
         == 0
     )
-    # Specification section 20: success prints the artifact paths, not only the run directory.
+    # Success prints the artifact paths, not only the run directory.
     reported = dict(
         line.split(": ", 1) for line in capsys.readouterr().err.splitlines() if ": " in line
     )
@@ -79,8 +79,8 @@ def test_cli_run_and_typed_error_codes(tmp_path: Path, capsys: pytest.CaptureFix
 def test_cli_envelope_reports_the_public_code_of_a_translated_stage_failure(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Specification sections 19 and 20: the envelope carries the public code, not the
-    stage's internal one, and the exit status follows the translated class."""
+    """The envelope carries the public code, not the stage's internal one, and the exit
+    status follows the translated class."""
     source = tmp_path / "duplicate.csv"
     source.write_text("a,a\n1,2\n", encoding="utf-8")
     assert main(["run", str(source), "--no-progress", "--output-dir", str(tmp_path / "out")]) == 2

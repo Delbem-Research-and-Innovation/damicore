@@ -53,7 +53,24 @@ def normalize_csv(
     *,
     config: NormalizationConfig | None = None,
 ) -> NormalizationResult:
-    """Normalize a local CSV into deterministic versioned object artifacts."""
+    """Normalize a local CSV into deterministic versioned object artifacts.
+
+    Writes ``manifest.json`` and one canonical byte file per object under ``objects/`` in
+    ``output_dir``, which must be absent or empty. One object is one column or one data row
+    according to ``config.split``. Every written object is re-read and checked against its
+    recorded size and SHA-256, and the CSV is re-stat'd afterwards, so the manifest is only
+    written once the artifacts and their source have been shown to agree. That manifest is
+    the input :func:`damicore_distance.compute_distance_matrix` expects.
+
+    Raises
+    ------
+    NormalizerError
+        ``csv_path`` is not a regular file (``input_validation_error``); ``output_dir``
+        exists and is not empty (``output_conflict_error``); the CSV violates the CSV
+        contract (``csv_format_error``); the CSV changed while it was being read
+        (``input_drift``); a written object does not match its digest
+        (``artifact_validation_error``).
+    """
     settings = config or NormalizationConfig()
     source = Path(csv_path).resolve()
     if not source.is_file():

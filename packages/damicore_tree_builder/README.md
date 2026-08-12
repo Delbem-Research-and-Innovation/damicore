@@ -15,7 +15,7 @@ pip install damicore-tree-builder
 ```python
 from damicore_tree_builder import build_tree
 
-result = build_tree("distance.npy", "labels.json", "run")
+result = build_tree("run/distance.npy", "run/labels.json", "run")
 ```
 
 `distance.npy` and `labels.json` are produced by the sibling `damicore-distance`

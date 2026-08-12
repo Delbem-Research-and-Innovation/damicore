@@ -1,6 +1,6 @@
 name: Benchmark
 
-# Specification section 24.4. Called by release.yml to prove the resource budget at the tag
+# Called by release.yml to prove the resource budget at the tag
 # commit, and dispatchable on demand to investigate a suspected regression. It is deliberately
 # not scheduled: the 2 GiB measurement is an assertion that belongs on a gate, and the object
 # sweep has no portable threshold, so a periodic run would only produce numbers nobody reads.

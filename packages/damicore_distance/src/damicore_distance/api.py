@@ -151,8 +151,8 @@ def _bounded_submit(
     ``Executor.map`` cannot be used here: it materialises its whole argument iterable before
     yielding anything, and every shard's tuple carries a full copy of the object paths and
     the compressed sizes. The pending payload would then grow with the pair count rather
-    than staying bounded by the worker count, which is the streaming invariant section 14
-    requires.
+    than staying bounded by the worker count, which is what the streaming invariant of this
+    stage requires.
     """
     pending: deque[Future[WorkerResult]] = deque()
     for argument in arguments:
@@ -180,9 +180,9 @@ def _typed_results(results: Iterator[WorkerResult]) -> Iterator[WorkerResult]:
     """Yield worker results, reporting a failed worker as a typed error.
 
     Both concurrency modes pass through here, so the failure contract does not depend on the
-    worker count. Section 19 requires a stable code on every public failure, and an exception
-    raised inside a worker would otherwise reach the caller as whatever type it happened to
-    be: MemoryError on an oversized shard, zlib.error on a corrupt stream.
+    worker count. Every public failure must carry a stable code, and an exception raised
+    inside a worker would otherwise reach the caller as whatever type it happened to be:
+    MemoryError on an oversized shard, zlib.error on a corrupt stream.
     """
     iterator = iter(results)
     while True:
@@ -421,7 +421,40 @@ def compute_distance_matrix(
     config: DistanceConfig | None = None,
     progress: ProgressCallback | None = None,
 ) -> DistanceResult:
-    """Compute or resume the exact NCD matrix from validated normalized objects."""
+    """Compute or resume the exact NCD matrix from validated normalized objects.
+
+    Takes the normalizer's ``manifest.json`` and re-verifies every object's path containment,
+    size, and SHA-256 before reading it. Writes ``distance.npy`` and ``labels.json`` into
+    ``output_dir``, plus ``checkpoints/compressed-sizes.json`` and
+    ``checkpoints/distance-shards.json``; ``config.save_diagnostics`` adds a ``diagnostics/``
+    directory. ``distance.npy`` is a float64 square memory map, validated as finite,
+    zero-diagonal, and bitwise symmetric before this returns, and it is what
+    :func:`damicore_tree_builder.build_tree` consumes together with ``labels.json``.
+
+    Pairs are computed shard by shard straight into the memory map, and each finished shard
+    is checkpointed with a digest, so an interrupted run resumes from the shards already
+    done. With ``config.resume`` disabled, existing outputs are a conflict instead of a
+    starting point. With more than one worker the shards run in spawned processes that
+    re-import the caller's ``__main__``, so a script-level call must sit under
+    ``if __name__ == "__main__":``.
+
+    Parameters
+    ----------
+    progress
+        Called once before work begins -- so a resumed run reports the pairs it inherited --
+        and again after each completed shard, as ``(completed, total, "distance")``.
+
+    Raises
+    ------
+    DistanceError
+        The normalization manifest or an object it names is invalid
+        (``artifact_validation_error``); a checkpoint or an existing ``distance.npy`` is
+        incompatible, corrupt, or disagrees with the matrix (``checkpoint_mismatch_error``);
+        outputs exist but resume is disabled (``output_directory_conflict_error``); the
+        compressor failed (``compression_error``); a worker died or returned an invalid shard
+        (``distance_computation_error``); the finished matrix breaks an invariant
+        (``distance_matrix_validation_error``).
+    """
     started = time.monotonic()
     settings = config or DistanceConfig()
     destination = Path(output_dir).resolve()

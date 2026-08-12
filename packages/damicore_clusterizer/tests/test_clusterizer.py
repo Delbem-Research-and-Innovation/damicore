@@ -269,7 +269,7 @@ def test_an_unknown_configuration_field_is_rejected() -> None:
 
 
 def test_the_root_is_removed_by_merging_its_two_edges(tmp_path: Path) -> None:
-    """Specification 16.1: a degree-two root is not a real bifurcation, so its two edges
+    """A degree-two root is not a real bifurcation, so its two edges
     become one edge between its children carrying the summed length, and every edge weight
     carries the summed length. This was unasserted while coverage read 100%."""
     graph_input = tree_graph.load_tree_graph(_tree(tmp_path))

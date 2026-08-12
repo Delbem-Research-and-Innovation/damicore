@@ -89,9 +89,9 @@ SCHEMA_VERSION = 1
 VERSION = metadata.version("damicore")
 logger = logging.getLogger(__name__)
 
-# Specification section 11.3 requires ResourceLimitError itself to carry the distinction
-# between CSV size and object count, because that is what tells a caller whether the run is
-# reshapable at all: a wider CSV stays feasible, more rows does not.
+# ResourceLimitError itself carries the distinction between CSV size and object count,
+# because that is what tells a caller whether the run is reshapable at all: a wider CSV
+# stays feasible, more rows does not.
 _SCALE_GUIDANCE = (
     "NCD is quadratic and Neighbor Joining cubic in the object count, so a multi-gigabyte CSV "
     "stays feasible while the object count is moderate, which is the usual case for "
@@ -156,7 +156,42 @@ def estimate(
     save_diagnostics: bool = False,
     execution: ExecutionConfig | None = None,
 ) -> ResourceEstimate:
-    """Inspect exact resource requirements without creating run artifacts."""
+    """Inspect exact resource requirements without creating run artifacts.
+
+    The whole CSV is hashed and scanned, but nothing is written: no run directory, no
+    normalized objects. Exceeding a limit is not a failure here, which is what makes this the
+    cheap way to decide whether a run is worth starting.
+
+    Parameters
+    ----------
+    split
+        Exactly ``"columns"`` or ``"rows"``. It decides what one object is, and therefore the
+        object count that every resource gate is quadratic or cubic in.
+    keep_normalized
+        Accepted for parity with :func:`run` and deliberately ignored: normalized bytes exist
+        on disk while a run is in progress either way, so they are always counted.
+    execution
+        ``None`` uses the defaults. Free disk is measured against ``./damicore-results``,
+        since no output directory has been chosen yet; a run writing elsewhere may see a
+        different amount of free space.
+
+    Returns
+    -------
+    ResourceEstimate
+        Returned whether or not the run fits. ``within_limits`` is ``False`` exactly when
+        ``violations`` is non-empty, and ``violations`` names each failed gate.
+
+    Raises
+    ------
+    ConfigurationError
+        ``split`` is not one of the two accepted values, or ``delimiter``, ``encoding`` or
+        ``execution`` is rejected by validation.
+    InputValidationError
+        ``csv_path`` is not a readable regular file, or the file changed while it was being
+        hashed and scanned (code ``input_drift``).
+    CSVFormatError
+        The CSV violates the CSV contract.
+    """
     checked_split = _validated_split(split)
     settings = _execution(execution)
     _normalization_config(checked_split, delimiter, encoding, settings)
@@ -406,10 +441,10 @@ _STAGE_TRANSLATIONS: tuple[
     ),
 )
 
-# Specification section 19 defines a public code as the class name in snake_case, which
-# DamicoreError already derives. A stage code must therefore never be forwarded, or the
-# public code would report the stage's internal vocabulary instead of the raised class.
-# input_drift is that section's single sanctioned specialization.
+# A public code is the class name in snake_case, which DamicoreError already derives. A
+# stage code must therefore never be forwarded, or the public code would report the stage's
+# internal vocabulary instead of the raised class. input_drift is the single sanctioned
+# specialization in 0.1.
 _PRESERVED_CODES = frozenset({"input_drift"})
 
 
@@ -461,7 +496,92 @@ def run(
     progress: bool = True,
     execution: ExecutionConfig | None = None,
 ) -> DamicoreResult:
-    """Execute, verify, and if possible resume the complete DAMICORE pipeline."""
+    """Execute, verify, and if possible resume the complete DAMICORE pipeline.
+
+    Preflight, normalization, the exact NCD matrix, Neighbor Joining, and FastGreedy run in
+    that order, and the artifacts they leave behind are cross-checked against one another
+    before the run is marked ``completed``. Once the run directory exists, a failure or an
+    interruption still writes ``report.json`` and updates ``manifest.json`` before the
+    exception propagates, so the partial state stays diagnosable and, where the checkpoints
+    allow it, resumable.
+
+    The distance stage spawns worker processes, which re-import the calling module, whenever
+    ``execution.workers`` resolves above ``1``; ``"auto"`` resolves from the CPU count, so
+    only an explicit ``workers=1`` rules the pool out. A call at module level in a ``.py``
+    script must therefore sit under ``if __name__ == "__main__":``; a notebook or REPL already
+    satisfies this.
+
+    Parameters
+    ----------
+    split
+        Exactly ``"columns"`` or ``"rows"``. It decides what one object is, and therefore the
+        object count that the resource gates are quadratic and cubic in.
+    compressor
+        Exactly ``"zlib"`` or ``"gzip"``. NCD values are compressor-dependent, so changing it
+        changes the run identity and the results, not merely their cost.
+    num_clusters
+        ``None`` lets FastGreedy choose the cut. Otherwise the upper bound is the object count
+        this CSV produces with this ``split``, which is only known after preflight, so an
+        oversized value is rejected there rather than at call time.
+    output_dir
+        ``None`` writes to ``./damicore-results/<run_id>``, where ``run_id`` is derived from
+        the input hash and the configuration, so repeating a call lands in the same directory
+        and reuses or resumes it. An explicit directory is used as given; it may be absent,
+        empty, or a compatible earlier run, and is never overwritten.
+    keep_normalized
+        Keeps ``normalization/`` in the run directory. Otherwise it is deleted once
+        verification succeeds, since the objects are reproducible from the CSV.
+    progress
+        Renders a progress bar for the distance stage through ``tqdm``. Purely presentational.
+    execution
+        ``None`` uses the defaults: automatic worker count, resume and completed-run reuse
+        enabled, and the default ``ResourceLimits``.
+
+    Returns
+    -------
+    DamicoreResult
+        The verified result, loaded through :func:`load_result`. It owns an open memory map
+        of ``distance.npy``; call ``close()`` when finished with it.
+
+    Raises
+    ------
+    ConfigurationError
+        An argument or configuration value is invalid, including ``num_clusters`` above the
+        object count. Raised before any run directory is created.
+    InputValidationError
+        ``csv_path`` is not a readable regular file, or its bytes changed between preflight
+        and normalization (code ``input_drift``).
+    CSVFormatError
+        The CSV violates the CSV contract.
+    ResourceLimitError
+        Preflight projected the run outside ``execution.limits``. ``context["estimate"]``
+        holds the ``ResourceEstimate`` behind the decision.
+    OutputDirectoryConflictError
+        ``output_dir`` is not a directory, holds no readable DAMICORE manifest, belongs to a
+        different input or configuration, or holds a compatible run that ``reuse_completed``
+        or ``resume`` forbids continuing.
+    CheckpointMismatchError
+        An incomplete run in ``output_dir`` was produced under a different runtime
+        fingerprint, or a checkpoint disagrees with the artifacts beside it.
+    CompressionError
+        The compressor rejected an object.
+    DistanceComputationError
+        The NCD stage failed, including a worker pool that died.
+    DistanceMatrixValidationError
+        The NCD stage's own check found the computed matrix not finite, zero-diagonal, and
+        symmetric.
+    NormalizationError, TreeBuildError, TreeFormatError, ClusterizationError
+        The corresponding stage failed with no more specific cause. ``TreeBuildError`` also
+        covers the tree stage rejecting the matrix it was given, which does not surface as
+        ``DistanceMatrixValidationError``.
+    ArtifactValidationError
+        An artifact failed its schema, its recorded hash or size, path containment, or the
+        cross-artifact verification.
+    DamicoreError
+        Any other failure inside the pipeline, named by the underlying exception type.
+    KeyboardInterrupt
+        Re-raised unchanged, after the run is recorded as interrupted.
+    """
     settings = _execution(execution)
     checked_split = _validated_split(split)
     checked_compressor = _validated_compressor(compressor)
@@ -503,8 +623,8 @@ def run(
             f"Resource limits exceeded: {', '.join(preview.violations)}. {_SCALE_GUIDANCE}",
             estimate=preview,
         )
-    # The upper bound of section 9.1 is part of the argument contract, but it is expressed in
-    # leaves, so preflight is the earliest point that can decide it. Checking here keeps a
+    # The upper bound on num_clusters is part of the argument contract, but it is expressed
+    # in leaves, so preflight is the earliest point that can decide it. Checking here keeps a
     # rejected argument from paying for normalization, the NCD matrix and the tree first.
     if num_clusters is not None and num_clusters > preview.object_count:
         raise ConfigurationError(
@@ -826,7 +946,27 @@ def run(
 
 
 def load_result(output_dir: str | Path) -> DamicoreResult:
-    """Load and verify a completed DAMICORE result without executing artifact code."""
+    """Load and verify a completed DAMICORE result without executing artifact code.
+
+    Every artifact the manifest declares is re-checked against its recorded size and SHA-256,
+    and any entry that is absolute, escapes the run directory, or is a symlink is rejected
+    before it is read. The matrix is memory-mapped with ``allow_pickle=False``, so no artifact
+    can execute code on load. Only runs whose manifest and report both say ``completed``, at
+    the current schema version, can be loaded; a failed or interrupted run is diagnostic only.
+
+    Returns
+    -------
+    DamicoreResult
+        A fresh result that owns its own open memory map of ``distance.npy``. Every call
+        produces an independent one, and each has to be closed by whoever received it.
+
+    Raises
+    ------
+    ArtifactValidationError
+        The only public failure of this function: a missing, unreadable, incomplete, or
+        wrong-version manifest or report; a hash or size mismatch; a path that escapes the
+        run directory; or a membership, cluster, or Newick artifact that does not parse.
+    """
     run_dir = Path(output_dir).resolve()
     paths = artifact_paths(run_dir)
     try:

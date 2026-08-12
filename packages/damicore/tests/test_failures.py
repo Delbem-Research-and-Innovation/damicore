@@ -57,9 +57,9 @@ def test_invalid_configuration_fails_before_csv_read(
 
 
 def test_too_many_requested_clusters_is_rejected_before_any_stage_runs(tmp_path: Path) -> None:
-    """Specification sections 9.1 and 9.2: the leaf bound belongs to the argument contract,
-    so it must fail as configuration at preflight rather than as a clusterizer failure after
-    normalization, the NCD matrix and the tree have already been computed."""
+    """The leaf bound belongs to the argument contract, so it must fail as configuration at
+    preflight rather than as a clusterizer failure after normalization, the NCD matrix and
+    the tree have already been computed."""
     output = tmp_path / "over-requested"
     with pytest.raises(ConfigurationError, match="num_clusters"):
         run(
@@ -73,8 +73,8 @@ def test_too_many_requested_clusters_is_rejected_before_any_stage_runs(tmp_path:
 
 
 def test_resource_limit_error_explains_the_object_count_distinction(tmp_path: Path) -> None:
-    """Specification section 11.3 requires the exception itself, not only the README, to
-    state that CSV size and object count scale differently."""
+    """The exception itself, not only the README, must state that CSV size and object count
+    scale differently."""
     with pytest.raises(ResourceLimitError, match="max_objects") as raised:
         run(
             _csv(tmp_path),

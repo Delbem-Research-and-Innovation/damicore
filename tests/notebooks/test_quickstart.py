@@ -1,4 +1,4 @@
-"""Executable notebook contract (specification sections 24.3 and 25.1).
+"""Executable notebook contract.
 
 The notebook must execute cell by cell in a kernel that resolves ``damicore`` from
 installed wheels, never from the checkout. CI builds that kernel and names it in

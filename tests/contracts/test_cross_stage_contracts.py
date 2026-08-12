@@ -1,4 +1,4 @@
-"""Cross-stage artifact contracts and verification invariants (specification sections 17, 24.2)."""
+"""Cross-stage artifact contracts and verification invariants."""
 
 from __future__ import annotations
 

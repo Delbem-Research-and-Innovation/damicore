@@ -1,7 +1,7 @@
 name: Auto tag
 
-# Publishing stays tag-defined (specification section 25.4); this workflow automates only
-# the tag's creation. When main starts declaring a version that has no tag yet, it verifies
+# Publishing stays tag-defined; this workflow automates only the tag's creation. When main
+# starts declaring a version that has no tag yet, it verifies
 # the version against every public package and the changelog, pushes vX.Y.Z, and dispatches
 # release.yml on that tag ref — a dispatch, because tag pushes made with the workflow token
 # deliberately fire no workflows. A merge that does not change the version finds its tag

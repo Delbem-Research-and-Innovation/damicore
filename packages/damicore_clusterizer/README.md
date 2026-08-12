@@ -15,13 +15,14 @@ pip install damicore-clusterizer
 ```python
 from damicore_clusterizer import ClusterConfig, cluster_tree
 
-result = cluster_tree("tree.json", "run", config=ClusterConfig(num_clusters=None))
+result = cluster_tree("run/tree.json", "run", config=ClusterConfig(num_clusters=None))
 ```
 
 `tree.json` is produced by the sibling `damicore-tree-builder` distribution; the
-call writes cluster membership as `membership.csv` and `clusters.json`. Negative
-branch lengths receive one global shift, and output cluster IDs and leaf
-ordering are deterministic.
+call writes cluster membership as `membership.csv` and `clusters.json`. Edge
+weights are branch-length reciprocals, shifted and scaled so the smallest is
+one, which makes a negative branch the weakest edge rather than the strongest;
+output cluster IDs and leaf ordering are deterministic.
 
 ## Links
 

@@ -1,4 +1,4 @@
-"""End-to-end pipeline behavior from a CSV path (specification sections 2, 9, 24.2)."""
+"""End-to-end pipeline behavior from a CSV path."""
 
 from __future__ import annotations
 
@@ -163,7 +163,7 @@ ARTIFACTS = (
 
 
 def test_the_worker_count_does_not_change_any_artifact(tmp_path: Path) -> None:
-    """Section 14 makes the result independent of the worker count. The distance package
+    """The NCD matrix is independent of the worker count. The distance package
     covers this for its own stage; this pins it for every artifact the pipeline publishes."""
     source = _dataset(tmp_path)
     serial = run(

@@ -58,6 +58,7 @@ make test
 make build
 ```
 
-Python 3.11–3.14 is supported. The normative contract is
-[`DAMICORE_IMPLEMENTATION_SPECIFICATION.md`](DAMICORE_IMPLEMENTATION_SPECIFICATION.md).
-Publishing a version is documented in [docs/releasing.md](docs/releasing.md).
+Python 3.11–3.14 is supported. Contributor rules live in [AGENTS.md](AGENTS.md) and the
+behavior they govern is fixed by the test suite; the reasoning behind the design is
+recorded in [docs/decisions/](docs/decisions). Publishing a version is documented in
+[docs/releasing.md](docs/releasing.md).

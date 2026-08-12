@@ -1,10 +1,10 @@
-"""Hypothesis properties for the compressor and the NCD matrix (specification 24.1).
+"""Hypothesis properties for the compressor and the NCD matrix.
 
 The example-based suite in ``test_distance.py`` pins named scenarios. These properties cover
 the two things a fixed example cannot: that the streaming, chunked, file-backed compressor
 agrees with a direct in-memory one for arbitrary payloads and chunk boundaries, and that the
-matrix built from random small object sets satisfies the section 14 invariants and the exact
-NCD ratio for every pair.
+matrix built from random small object sets satisfies the NCD invariants and the exact ratio
+for every pair.
 """
 
 from __future__ import annotations
@@ -139,8 +139,8 @@ def test_pair_compression_equals_compressing_the_joined_bytes(
     chunk_bytes: int,
     compressor: str,
 ) -> None:
-    """Specification section 14.1: C(xy) feeds x then y through one compressor instance and
-    must equal compressing the concatenation, which the implementation never materializes."""
+    """C(xy) feeds x then y through one compressor instance and must equal compressing the
+    concatenation, which the implementation never materializes."""
     directory = tmp_path_factory.mktemp("pair")
     left_path = _object_file(directory, "left.jsonl", left)
     right_path = _object_file(directory, "right.jsonl", right)
@@ -162,7 +162,7 @@ def test_pair_compression_equals_compressing_the_joined_bytes(
     cxy=st.integers(min_value=0, max_value=40_000),
 )
 def test_ncd_is_the_exact_ratio_and_is_never_clamped(cx: int, cy: int, cxy: int) -> None:
-    """Specification section 14.1: the result is not truncated, rounded or bounded to 0..1."""
+    """The result is not truncated, rounded or bounded to 0..1."""
     value = normalized_compression_distance(cx, cy, cxy)
     assert value == (cxy - min(cx, cy)) / max(cx, cy)
     assert normalized_compression_distance(cy, cx, cxy) == value

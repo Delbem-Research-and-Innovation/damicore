@@ -16,6 +16,16 @@ from damicore.errors import CSVFormatError, InputValidationError
 
 
 class ResourceEstimate(BaseModel):
+    """What a run of this CSV under this configuration would cost, measured before it starts.
+
+    The counts and the input and normalized byte totals come from hashing and scanning the
+    whole file, so they are exact rather than sampled; the memory and disk figures are
+    conservative projections, and free disk is the one number read from the live filesystem.
+    ``within_limits`` is ``False`` exactly when ``violations`` is non-empty, and ``violations``
+    names the gates in a fixed order. ``estimate()`` returns this either way; ``run()`` turns
+    a non-empty ``violations`` into ``ResourceLimitError``.
+    """
+
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     csv_path: Path

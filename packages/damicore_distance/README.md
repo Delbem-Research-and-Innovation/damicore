@@ -15,11 +15,14 @@ pip install damicore-distance
 ```python
 from damicore_distance import DistanceConfig, compute_distance_matrix
 
-result = compute_distance_matrix(
-    "normalization/manifest.json",
-    "run",
-    config=DistanceConfig(compressor="zlib", workers="auto"),
-)
+# `workers="auto"` opens a process pool whose workers re-import the calling module, so in a
+# `.py` script this call must sit under the guard below. A notebook or REPL satisfies it too.
+if __name__ == "__main__":
+    result = compute_distance_matrix(
+        "normalization/manifest.json",
+        "run",
+        config=DistanceConfig(compressor="zlib", workers="auto"),
+    )
 ```
 
 The manifest is produced by the sibling `damicore-normalizer` distribution; the
