@@ -160,10 +160,12 @@ def check_wheel_advertises_only_what_it_ships(
     """
     with ZipFile(path) as archive:
         members = archive.namelist()
+    # Importable top-level packages only. A wheel may also carry a ``<name>-<version>.data``
+    # tree for scripts and data files, which is not a package and has no py.typed to ship.
     packages = {
         name.split("/")[0]
         for name in members
-        if "/" in name and ".dist-info/" not in name
+        if "/" in name and not name.split("/")[0].endswith((".dist-info", ".data"))
     }
     if "Typing :: Typed" in metadata.get_all("Classifier", []):
         for package in sorted(packages):

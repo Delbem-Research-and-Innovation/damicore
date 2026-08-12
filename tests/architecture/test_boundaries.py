@@ -389,6 +389,40 @@ def test_publish_allowlist_matches_the_public_workspace_members() -> None:
     assert set(declared.group(1).split()) == publishable == PUBLIC
 
 
+def test_the_aggregate_publishes_only_after_the_stages_it_depends_on() -> None:
+    """`damicore` requires the four stage distributions within its own release, so it must
+    reach an index only once they are on it.
+
+    Publishing all five as one matrix left them unordered, and the 0.1.0 release put
+    `damicore` on PyPI eleven minutes before `damicore-tree-builder`; for those eleven
+    minutes `pip install damicore` could not resolve. Merging the two publish jobs back
+    together would restore that window silently, because no other check reads the workflow.
+
+    Parsed by hand rather than with a YAML library: PyYAML reaches this environment only as
+    a transitive dependency of pre-commit, and depending on one of those undeclared is the
+    same defect this suite exists to catch.
+    """
+    workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    blocks = dict(
+        re.findall(
+            r"^  ([a-z-]+):\n(.*?)(?=^  [a-z-]+:\n|\Z)",
+            workflow,
+            re.MULTILINE | re.DOTALL,
+        )
+    )
+    assert {"publish-pypi", "publish-pypi-stages", "github-release"} <= blocks.keys(), (
+        sorted(blocks)
+    )
+    aggregate_needs = re.search(
+        r"^    needs:\s*(.+)$", blocks["publish-pypi"], re.MULTILINE
+    )
+    assert aggregate_needs is not None, blocks["publish-pypi"]
+    assert "publish-pypi-stages" in aggregate_needs.group(1), aggregate_needs.group(1)
+    # The stages must still be the matrix leg, or "after the stages" would mean one of them.
+    assert "matrix:" in blocks["publish-pypi-stages"]
+    assert "matrix:" not in blocks["publish-pypi"]
+
+
 # Written in halves so this guard is not itself the last file naming the retired document.
 RETIRED_SPECIFICATION = "DAMICORE_IMPLEMENTATION" + "_SPECIFICATION"
 # Either noun followed by a number, in any case, because the retired document was cited
@@ -399,6 +433,12 @@ RETIRED_SPECIFICATION = "DAMICORE_IMPLEMENTATION" + "_SPECIFICATION"
 SECTION_CITATION = re.compile(
     r"\b(sections?|specifications?)\s+\d+(\.\d+)*\b", re.IGNORECASE
 )
+# Published standards number their own sections, and this is a CSV project, so a line citing
+# RFC 4180 or a PEP is expected prose rather than a dangling pointer. Judged per line, so an
+# external citation does not excuse the rest of the file.
+EXTERNAL_STANDARD = re.compile(
+    r"\b(RFC|PEP|ISO|IEEE)\b|Apache License|License, Version"
+)
 SCANNED_SUFFIXES = {
     ".cfg",
     ".ipynb",
@@ -406,6 +446,7 @@ SCANNED_SUFFIXES = {
     ".md",
     ".mk",
     ".py",
+    ".pyi",
     ".toml",
     ".yaml",
     ".yml",
@@ -438,15 +479,31 @@ def test_no_repository_file_cites_the_retired_implementation_specification() -> 
             for part in path.relative_to(ROOT).parts[:-1]
         )
     ]
-    # Guards the discovery: an empty or truncated scan would make the assertion below vacuous.
-    # Set just under the current count, so losing a whole directory fails here.
-    assert len(surfaces) >= 100, len(surfaces)
+    # Guards the discovery. Named representatives rather than a count: one file per region
+    # the scan has to reach, including the two that a filename-level dot filter and a
+    # suffix-only filter each used to drop. A count would rot, since nobody raises it.
+    found = {path.relative_to(ROOT).as_posix() for path in surfaces}
+    for representative in (
+        "Makefile",
+        ".pre-commit-config.yaml",
+        ".github/workflows/release.yml",
+        "packages/damicore/src/damicore/api.py",
+        "packages/package.mk",
+        "stubs/igraph/__init__.pyi",
+        "notebooks/colab_quickstart.ipynb",
+        "docs/releasing.md",
+    ):
+        assert representative in found, representative
 
     citing: list[str] = []
     for path in surfaces:
         text = path.read_text(encoding="utf-8", errors="replace")
-        if RETIRED_SPECIFICATION in text or SECTION_CITATION.search(text):
+        if RETIRED_SPECIFICATION in text:
             citing.append(str(path.relative_to(ROOT)))
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            if SECTION_CITATION.search(line) and not EXTERNAL_STANDARD.search(line):
+                citing.append(f"{path.relative_to(ROOT)}:{number}")
     assert not citing, citing
 
 

@@ -9,6 +9,17 @@ execute it; this file states the procedure and the facts that live outside the r
 on PyPI is immutable and its number can never be reused, so the next release is a new
 version — not a rebuild of this one.
 
+`main` has since moved past `v0.1.0` while still declaring `0.1.0`, so two things are true
+until the next version bump, and neither makes any check fail:
+
+- Merging changes releases nothing. `auto-tag.yml` finds `v0.1.0` already on the remote,
+  prints `nothing to release`, and exits 0. A green run is not a release.
+- `make build` produces wheels labelled `0.1.0` whose bytes differ from the `0.1.0` on
+  PyPI. Nothing compares a local build against the index, so treat any artifact built from
+  an unbumped `main` as a development build and never upload one.
+
+Both close the moment the five versions and the changelog heading move to the next number.
+
 ## Trigger
 
 **Changing the version on `main` is the act that publishes.** `auto-tag.yml` fires on every
