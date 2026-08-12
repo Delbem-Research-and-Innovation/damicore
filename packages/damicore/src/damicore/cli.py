@@ -244,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         # convention for death by SIGPIPE. Redirect stdout to devnull to suppress the
         # "Exception ignored" message that Python prints during cleanup when the pipe is broken.
         import os
+
         try:
             os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         except (AttributeError, OSError):
