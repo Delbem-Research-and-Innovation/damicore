@@ -1,5 +1,5 @@
 .PHONY: help install check test coverage-critical build wheels clean
-.PHONY: print-public-packages print-stage-packages
+.PHONY: print-public-packages print-stage-packages print-aggregate-package
 
 # The publish allowlist. Deliberately explicit rather than derived from the workspace, so a
 # new package cannot become publishable by accident. tests/architecture asserts this list
@@ -8,6 +8,10 @@ PUBLIC_PACKAGES := damicore_normalizer damicore_distance damicore_tree_builder d
 
 # The four stage packages, which own one pipeline stage each and must install alone.
 STAGE_PACKAGES := $(filter-out damicore,$(PUBLIC_PACKAGES))
+
+# The aggregate, derived rather than restated: it is the public package that is not a stage.
+# It publishes last, because it depends on the four that are.
+AGGREGATE_PACKAGE := $(filter-out $(STAGE_PACKAGES),$(PUBLIC_PACKAGES))
 
 # Modules held to the 95% critical-coverage floor.
 CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy
@@ -23,6 +27,7 @@ help:
 	@echo "  wheels                Build wheels only, for the smoke lanes"
 	@echo "  print-public-packages Print the publish allowlist"
 	@echo "  print-stage-packages  Print the allowlist without the orchestrator"
+	@echo "  print-aggregate-package Print the orchestrator distribution alone"
 	@echo "  clean                 Remove build artifacts and the shared .venv"
 
 install:
@@ -58,6 +63,9 @@ print-public-packages:
 
 print-stage-packages:
 	@echo $(STAGE_PACKAGES)
+
+print-aggregate-package:
+	@echo $(AGGREGATE_PACKAGE)
 
 clean:
 	@echo "Remove .venv, dist, coverage, and test caches explicitly when needed."

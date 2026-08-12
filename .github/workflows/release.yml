@@ -35,6 +35,8 @@ jobs:
       # Make allowlist as every other job, so a package added there publishes here without a
       # second list to forget.
       dists: ${{ steps.allowlist.outputs.dists }}
+      stage_dists: ${{ steps.allowlist.outputs.stage_dists }}
+      aggregate: ${{ steps.allowlist.outputs.aggregate }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -52,6 +54,9 @@ jobs:
         run: |
           dists=$(printf '%s\n' $(make -s print-public-packages) | tr '_' '-' | jq -cRn '[inputs]')
           echo "dists=$dists" >> "$GITHUB_OUTPUT"
+          stages=$(printf '%s\n' $(make -s print-stage-packages) | tr '_' '-' | jq -cRn '[inputs]')
+          echo "stage_dists=$stages" >> "$GITHUB_OUTPUT"
+          echo "aggregate=$(make -s print-aggregate-package | tr '_' '-')" >> "$GITHUB_OUTPUT"
 
   # The 2 GiB resource budget is proven at the tag commit, before
   # anything irreversible is published. The object sweep is left out because it asserts no
@@ -255,14 +260,20 @@ jobs:
   # The irreversible step. The same artifacts the build job produced; nothing is rebuilt
   # between the two indexes. Same per-distribution matrix and environments as the TestPyPI
   # job, for the same pending-publisher uniqueness reason.
-  publish-pypi:
+  # The stage distributions go first, and the aggregate only after all four have landed.
+  # Order matters because damicore pins the four within this release: publishing all five as
+  # one matrix put damicore on PyPI 11 minutes before damicore-tree-builder during the 0.1.0
+  # release, and for those 11 minutes `pip install damicore` could not resolve. fail-fast
+  # stays false so one missing publisher cannot strand the other three, but a stage that
+  # fails now blocks the aggregate instead of orphaning it.
+  publish-pypi-stages:
     needs: [tag-guard, smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        dist: ${{ fromJSON(needs.tag-guard.outputs.dists) }}
+        dist: ${{ fromJSON(needs.tag-guard.outputs.stage_dists) }}
     environment: release-${{ matrix.dist }}
     permissions:
       id-token: write
@@ -275,6 +286,28 @@ jobs:
         run: |
           mkdir upload
           cp dist/$(echo "${{ matrix.dist }}" | tr '-' '_')-* upload/
+          ls upload
+      - uses: pypa/gh-action-pypi-publish@release/v1.14
+        with:
+          packages-dir: upload
+          skip-existing: true
+
+  publish-pypi:
+    needs: [tag-guard, publish-pypi-stages]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release-${{ needs.tag-guard.outputs.aggregate }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: distributions
+          path: dist
+      - name: Select this distribution's files
+        run: |
+          mkdir upload
+          cp dist/$(echo "${{ needs.tag-guard.outputs.aggregate }}" | tr '-' '_')-* upload/
           ls upload
       - uses: pypa/gh-action-pypi-publish@release/v1.14
         with:

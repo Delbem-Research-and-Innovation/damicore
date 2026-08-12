@@ -40,7 +40,9 @@ versions (every CI job installs with `--locked` and fails on a stale lock), and 
    installed from PyPI using the built artifacts, then the five DAMICORE
    distributions are swapped for their pinned TestPyPI publications; the CLI and
    pipeline smoke run against that environment (notebook on 3.12 only).
-6. PyPI publish via Trusted Publishing, same artifacts as step 4.
+6. PyPI publish via Trusted Publishing, same artifacts as step 4, in two stages: the
+   four stage distributions, and then `damicore`, which pins them. The aggregate is
+   never on the index before the packages it requires.
 7. GitHub Release with the version's changelog section and `SHA256SUMS`.
 
 ## External preconditions (configure before the first tag)
@@ -87,11 +89,12 @@ Additionally:
   and the run goes green. A green release run is therefore not evidence that anything was
   published — check the version on PyPI itself. This is why fixing forward means a new
   version number, never a re-run of the old one.
-- The five distributions publish as five independent matrix legs with `fail-fast: false`,
-  so one failing leg does not stop the other four. Since `damicore` pins its four stage
-  packages within the release, a partial publish can leave an installable-looking
-  `damicore` whose dependencies are not on the index. If a leg fails, check all five names
-  on PyPI before deciding what to do next.
+- The four stage distributions publish as independent matrix legs with `fail-fast: false`,
+  so one failing leg does not strand the other three. A failed leg does block `damicore`,
+  which publishes only after all four have landed — during the 0.1.0 release the aggregate
+  reached PyPI eleven minutes before `damicore-tree-builder`, and for those eleven minutes
+  `pip install damicore` could not resolve. If a stage leg fails, fix its cause and re-run:
+  the legs that landed skip, and the aggregate follows once all four are present.
 - Artifacts are never rebuilt between TestPyPI and PyPI; both publish jobs upload
   the exact files the build job produced.
 - A version that reached PyPI cannot be retracted; fix forward with a new patch version.
