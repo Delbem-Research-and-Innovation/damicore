@@ -7,6 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ResourceLimits(BaseModel):
+    """The gates preflight applies before a run starts, sized for the exact 0.1 algorithm.
+
+    Raise one only after reading an ``estimate()``: NCD is quadratic and Neighbor Joining
+    cubic in the object count, so a limit lifted without that check buys a run that does not
+    finish. Two gates are less visible than the object, pair, and matrix caps.
+    ``max_working_memory_bytes`` bounds the peak RAM the distance stage is projected to need
+    from the largest serialized chunk, the worker count, and the shard size.
+    ``required_free_disk_factor`` is the headroom multiplier applied to the projected artifact
+    bytes; the free-disk check it produces is enforced no matter how the limits are set.
+    """
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     max_objects: int = Field(default=1_000, gt=0)
@@ -17,6 +28,15 @@ class ResourceLimits(BaseModel):
 
 
 class ExecutionConfig(BaseModel):
+    """How a run is executed, as opposed to what it computes.
+
+    These settings change cost and restart behavior, not the clustering: the pipeline is
+    exact and deterministic under any of them. They do change run identity -- every field
+    except ``resume`` and ``reuse_completed`` enters the configuration hash that names the
+    default output directory, so ``workers="auto"`` resolving differently on another machine
+    produces a different run rather than resuming the existing one.
+    """
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     workers: int | Literal["auto"] = "auto"

@@ -16,6 +16,12 @@ from damicore.manifest import ArtifactRecord, RunManifest, atomic_json
 
 
 class ArtifactPaths(BaseModel):
+    """Where a run's artifacts live on disk, as absolute paths under ``run_dir``.
+
+    The two optional directories are ``None`` when the run did not keep them; the remaining
+    paths are the run's fixed layout and are reported by name, not by probing the filesystem.
+    """
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     run_dir: Path
@@ -32,6 +38,13 @@ class ArtifactPaths(BaseModel):
 
 
 class RunReport(BaseModel):
+    """The ``report.json`` payload: what one run did, or how far it got before it stopped.
+
+    ``status`` is the only success signal. ``completed`` fills in the measurements and the
+    verification checks; ``failed`` and ``interrupted`` are diagnostic, and describe the stop
+    through ``failed_stage``, ``error``, and whichever timings had already been recorded.
+    """
+
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     status: Literal["completed", "failed", "interrupted"]
@@ -60,6 +73,15 @@ class RunReport(BaseModel):
 
 @dataclass
 class DamicoreResult:
+    """A verified, completed run, together with the memory map it holds open.
+
+    ``distance_matrix`` keeps ``distance.npy`` mapped for as long as this object lives.
+    ``close()`` releases that map and leaves the view unusable; the other fields are ordinary
+    in-memory values and stay valid afterwards. Every ``load_result`` call -- including the
+    one :func:`damicore.run` returns through -- hands back a distinct result with its own
+    map, so each one is owned, and has to be closed, by whoever received it.
+    """
+
     membership: pd.DataFrame
     clusters: dict[int, list[str]]
     tree_newick: str
@@ -68,6 +90,22 @@ class DamicoreResult:
     artifacts: ArtifactPaths
 
     def save(self, output_dir: str | Path) -> ArtifactPaths:
+        """Copy exactly the artifacts this run's manifest declares to a new directory.
+
+        The destination must be absent or empty, so nothing is ever overwritten. Every file
+        is re-hashed as it is copied and written through a same-directory temporary file, so
+        a partially copied or drifted artifact never appears under its final name. The saved
+        manifest records the new location.
+
+        Raises
+        ------
+        OutputDirectoryConflictError
+            The destination exists and is not an empty directory.
+        ArtifactValidationError
+            The manifest is unreadable or not ``completed``, an artifact is missing, escapes
+            the run directory, is duplicated in the inventory, or changed since it was
+            recorded.
+        """
         destination = Path(output_dir).resolve()
         if destination.exists() and (not destination.is_dir() or any(destination.iterdir())):
             raise OutputDirectoryConflictError("Destination must be absent or empty")

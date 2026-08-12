@@ -17,7 +17,25 @@ def cluster_tree(
     *,
     config: ClusterConfig | None = None,
 ) -> ClusterResult:
-    """Cluster every node in an unrooted tree and project communities to leaves."""
+    """Cluster every node in an unrooted tree and project communities to leaves.
+
+    Takes ``tree.json`` as the tree stage writes it and runs FastGreedy over the whole tree
+    graph, internal nodes included, then keeps only the leaves of each community. A community
+    made entirely of internal nodes therefore disappears, which is why ``cluster_count`` can
+    be lower than ``community_count``. Cluster numbers are assigned by sorting the groups by
+    their object ids, so the numbering depends on the tree rather than on FastGreedy's
+    internal ordering. Writes ``membership.csv`` and ``clusters.json`` into ``output_dir``;
+    both must be absent, since neither is overwritten.
+
+    Raises
+    ------
+    ClusterizerError
+        ``config.num_clusters`` exceeds the leaf count (``configuration_error``); the tree
+        artifact is missing, unparsable, or not a valid unrooted binary tree
+        (``tree_format_error``); the resulting communities do not cover every leaf
+        (``clusterization_error``); the outputs already exist
+        (``output_directory_conflict_error``).
+    """
     started = time.monotonic()
     settings = config or ClusterConfig()
     source = load_tree_graph(Path(tree_path).resolve())

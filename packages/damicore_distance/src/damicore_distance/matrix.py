@@ -33,6 +33,21 @@ class DistanceResult(BaseModel):
 
 
 class DistanceMatrixView:
+    """A read-only view of a persisted ``distance.npy``, backed by a memory map.
+
+    The array is never loaded whole. ``shape``, ``dtype``, and indexing read through NumPy
+    slicing, so a submatrix costs only the pages it touches; the file is opened with
+    ``allow_pickle=False``, so an artifact cannot execute code. The map stays open until
+    ``close()``, after which every accessor raises ``ValueError``.
+
+    ``head`` and ``to_pandas`` are the only members that need pandas, which is an extra of
+    this distribution rather than a dependency. Without it they raise ``DistanceError`` with
+    code ``missing_dependency_error``. ``to_pandas`` additionally refuses to materialize a
+    matrix larger than ``materialization_limit_bytes`` unless ``force=True``, raising the
+    injected ``materialization_error`` -- ``ValueError`` by default, and
+    ``damicore.MaterializationError`` for a view built by ``damicore.load_result``.
+    """
+
     def __init__(
         self,
         path: str | Path,
