@@ -15,7 +15,7 @@ pip install damicore-clusterizer
 ```python
 from damicore_clusterizer import ClusterConfig, cluster_tree
 
-result = cluster_tree("tree.json", "run", config=ClusterConfig(num_clusters=None))
+result = cluster_tree("run/tree.json", "run", config=ClusterConfig(num_clusters=None))
 ```
 
 `tree.json` is produced by the sibling `damicore-tree-builder` distribution; the

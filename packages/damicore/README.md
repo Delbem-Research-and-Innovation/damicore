@@ -34,6 +34,7 @@ if __name__ == "__main__":
     result.close()
 
     restored = load_result(result.artifacts.run_dir)
+    restored.close()
 ```
 
 `estimate` reports the exact cost of a run — objects, pairs, matrix bytes, working
@@ -60,7 +61,7 @@ branch on the status and log the reason.
 | 0 | Completed |
 | 2 | Configuration or input rejected, including a malformed CSV |
 | 3 | A resource limit would be exceeded |
-| 4 | An artifact failed validation |
+| 4 | A stage or an artifact failed; the `code` on stderr names which |
 | 5 | The output directory conflicts, or a checkpoint does not match |
 | 130 | Interrupted; the run is resumable |
 | 141 | Terminated by a broken pipe (the SIGPIPE convention), e.g. when piping to `head` |
