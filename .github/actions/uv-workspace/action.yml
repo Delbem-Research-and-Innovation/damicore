@@ -2,7 +2,7 @@ name: Set up the uv workspace
 description: >
   Installs the pinned uv toolchain, rejects pre-release interpreters, and optionally
   synchronizes the workspace from the committed lock. This is the single source of truth
-  for the CI toolchain pins required by specification section 8.5.
+  for the CI toolchain pins.
 
 inputs:
   python-version:

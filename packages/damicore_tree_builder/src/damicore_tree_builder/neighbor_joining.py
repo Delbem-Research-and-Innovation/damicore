@@ -10,8 +10,8 @@ import numpy.typing as npt
 from damicore_tree_builder.errors import TreeBuilderError
 from damicore_tree_builder.models import Tree, TreeEdge, TreeNode
 
-# Section 15.2: two Q scores closer than this, relative to the magnitude of the better one,
-# are one tie for the lexicographic rule to break.
+# Two Q scores closer than this, relative to the magnitude of the better one, are one tie
+# for the lexicographic rule to break.
 #
 # An exact float64 comparison asserts a precision the input never had: every distance here is
 # a ratio of integer compressed sizes, so its meaningful digits run out long before the
@@ -106,7 +106,7 @@ def build_neighbor_joining(
             node: float(sum(work[slots[node], slots[other]] for other in active if other != node))
             for node in active
         }
-        # Section 15.2: the smallest Q wins, and pairs within the tie band are resolved by the
+        # The smallest Q wins, and pairs within the tie band are resolved by the
         # smallest pair of IDs. `active` is sorted and pairs are visited in that order, so the
         # running pair is always the lexicographically earliest one seen so far; a later pair
         # therefore replaces it only by winning outright, never by tying with it.

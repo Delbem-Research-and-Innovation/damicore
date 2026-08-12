@@ -12,10 +12,11 @@ from damicore import ExecutionConfig, ResourceLimits, estimate, run
 from damicore_normalizer import NormalizationConfig, normalize_csv
 from synthetic_data import generate_csv
 
-# Object counts required by specification section 24.4.
+# Roughly geometric, because Neighbor Joining is cubic in the object count: each step costs
+# several times the one before, so a linear sweep would spend all its time at the top end.
 OBJECT_COUNTS = (100, 250, 500, 1_000)
 
-# Specification section 24.4 budgets 1.5 GiB of peak RSS while normalizing the large input.
+# The budget: 1.5 GiB of peak RSS while normalizing the large input.
 NORMALIZATION_RSS_BUDGET_BYTES = 1_610_612_736
 
 
@@ -65,7 +66,7 @@ def main() -> None:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--rows", type=int, default=1_000)
     parser.add_argument("--target-bytes", type=int, default=2_147_483_648)
-    # Specification section 24.4 defines two benchmarks with different costs: the large
+    # The two benchmarks have very different costs: the large
     # normalization measurement needs a multi-gigabyte working set, while the object sweep is
     # minutes of CPU. Exactly one per process, and required, so that neither "neither" nor
     # "both" can be requested: ru_maxrss is a whole-process high-water mark, so a second
@@ -82,11 +83,11 @@ def main() -> None:
         nargs="+",
         default=OBJECT_COUNTS,
         help=(
-            "object counts to sweep; defaults to the counts required by specification "
-            "section 24.4. A caller that narrows this is trading coverage for wall time."
+            "object counts to sweep; defaults to %(default)s. A caller that "
+            "narrows this is trading coverage for wall time."
         ),
     )
-    # Specification section 24.4 compares a run against the median of the last three on the
+    # A run is compared against the median of the last three on the
     # same runner, which is impossible while the numbers only reach stdout of a finished job.
     parser.add_argument(
         "--output",
@@ -126,9 +127,9 @@ def main() -> None:
             "peak_rss_bytes": preflight_peak_rss,
         }
         # The budgeted stage. Preflight scans the CSV without writing a single object file, so
-        # measuring it alone leaves the stage the specification actually names unmeasured.
-        # Section 24.4 stops here: normalization is the last stage the 1.5 GiB budget covers,
-        # and going further would only add the cubic cost this measurement does not need.
+        # measuring it alone leaves the budgeted stage unmeasured. The measurement stops
+        # here: normalization is the last stage the 1.5 GiB budget covers, and going further
+        # would only add the cubic cost this measurement does not need.
         started = time.monotonic()
         normalization = normalize_csv(
             large_path,
@@ -176,7 +177,6 @@ def main() -> None:
         )
         result.close()
         seconds = time.monotonic() - started
-        # Specification section 24.4 requires time, disk, RSS and pairs per second.
         measurements[f"algorithm_{objects}"] = {
             "object_count": preview.object_count,
             "pair_count": preview.pair_count,

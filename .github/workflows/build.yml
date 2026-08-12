@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Specification section 25.2. The notebook smoke deliberately lives in ci.yml only; both
+  # The notebook smoke deliberately lives in ci.yml only; both
   # lanes installed the same wheel closure, so running it twice bought no signal.
   build:
     runs-on: ubuntu-24.04

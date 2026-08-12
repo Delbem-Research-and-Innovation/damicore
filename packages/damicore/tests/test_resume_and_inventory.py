@@ -1,6 +1,6 @@
 """Guards that only a partially finished run, a tampered inventory, or a stage receipt that
-disagrees with the bytes on disk can reach: the resume decision table of specification
-section 12, the cross-artifact verification of section 18, and the manifest totality rules.
+disagrees with the bytes on disk can reach: the resume decision table, the cross-artifact
+verification, and the manifest totality rules.
 """
 
 import json

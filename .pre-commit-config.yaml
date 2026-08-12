@@ -22,9 +22,9 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-      # A two-space line ending in Markdown is a hard line break, not stray whitespace;
-      # the specification's header depends on them. This keeps the hook from rewriting
-      # rendering while still trimming real trailing whitespace everywhere else.
+      # A two-space line ending in Markdown is a hard line break, not stray whitespace.
+      # This keeps the hook from rewriting rendering while still trimming real trailing
+      # whitespace everywhere else.
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer

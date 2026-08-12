@@ -24,7 +24,7 @@ from damicore.estimate import ResourceEstimate
 from damicore.result import ArtifactPaths, DamicoreResult, RunReport
 
 # The attribute a consumer looks for. Not in __all__: it is metadata about the package,
-# not part of the API surface section 9.4 closes.
+# not part of the closed public API surface.
 __version__ = VERSION
 
 __all__ = [

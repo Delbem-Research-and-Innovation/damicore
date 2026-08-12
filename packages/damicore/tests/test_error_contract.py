@@ -1,12 +1,12 @@
-"""The public failure contract of specification section 19.
+"""The public failure contract, which this module is the source of truth for.
 
-Section 19 fixes one rule for every public exception: ``code`` is the class name in
-snake_case, and ``input_drift`` is the version 0.1 exception to it. That rule is what
-callers and the CLI's JSON error envelope depend on, so it is asserted here as a rule over
-the whole hierarchy rather than as a per-class expectation. A class added to the hierarchy,
-or a stage code added to the translation table, is covered the moment it exists.
+One rule holds for every public exception: ``code`` is the class name in snake_case, and
+``input_drift`` is the version 0.1 exception to it. That rule is what callers and the CLI's
+JSON error envelope depend on, so it is asserted here as a rule over the whole hierarchy
+rather than as a per-class expectation. A class added to the hierarchy, or a stage code
+added to the translation table, is covered the moment it exists.
 
-Messages are deliberately not asserted here. Section 19 calls them actionable, so they are a
+Messages are deliberately not asserted here. They must be actionable, which makes them a
 human-facing surface that may be reworded; the per-stage suites match them only where they
 are the sole way to tell two violations of the same contract apart.
 """
@@ -84,7 +84,7 @@ def test_translation_of_a_stage_default_code_reports_the_public_class() -> None:
 
 
 def test_input_drift_is_the_only_code_that_survives_translation() -> None:
-    """Specification section 19 sanctions exactly one specialized code in 0.1."""
+    """Exactly one specialized code is sanctioned in 0.1."""
     assert _PRESERVED_CODES == frozenset({"input_drift"})
     translated = _translated_stage_error(NormalizerError("boom", code="input_drift"))
     assert translated.code == "input_drift"

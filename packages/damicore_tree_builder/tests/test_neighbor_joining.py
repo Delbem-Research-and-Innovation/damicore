@@ -100,7 +100,7 @@ def test_additive_matrix_is_reconstructed_exactly_by_path_sums() -> None:
 
 
 def test_negative_branch_length_is_preserved_through_every_artifact(tmp_path: Path) -> None:
-    """Specification section 15.2: a negative length is a real Neighbor Joining outcome on a
+    """A negative length is a real Neighbor Joining outcome on a
     non-additive matrix and is reported, never truncated to zero."""
     matrix = np.array([[0.0, 1.0, 1.0], [1.0, 0.0, 10.0], [1.0, 10.0, 0.0]], dtype=np.float64)
     ids = ["a", "b", "c"]
@@ -360,7 +360,7 @@ def test_a_failed_tree_write_leaves_no_temporary_file(
 
 
 # At three remaining nodes every pair has Q = -(d_ij + d_ik + d_jk), so all three are exactly
-# equal whatever the distances are. Section 15.2 then mandates the lexicographically smallest
+# equal whatever the distances are. The tie rule then mandates the lexicographically smallest
 # ID pair. Row sums are recomputed each round precisely so this equality survives as an exact
 # float64 tie: maintained incrementally they drift, and drift, not the rule, picks the pair.
 @pytest.mark.parametrize(
@@ -389,7 +389,7 @@ def test_an_exact_q_tie_is_broken_by_the_smallest_id_pair(order: list[str]) -> N
 
 # With four clusters left, Q(i,j) and Q(k,l) for complementary pairs are algebraically equal
 # for every matrix: R_i+R_l and R_j+R_k expand to the same sum, so the two Q values cancel to
-# each other. float64 loses that equality on roughly 40% of inputs, which is why section 15.2
+# each other. float64 loses that equality on roughly 40% of inputs, which is why the tie rule
 # compares within a relative band. Fractions reproduce the rule exactly, so they are the
 # authority the implementation is checked against.
 # Seeds 11, 16 and 22 are the cases where a later pair scores marginally BELOW the running
@@ -425,7 +425,7 @@ def test_the_first_join_follows_the_rule_a_float_comparison_would_lose(seed: int
 
 @pytest.mark.parametrize("q_block_size", [1, 2, 3, 512])
 def test_the_q_block_size_does_not_change_the_tree(q_block_size: int) -> None:
-    """Specification section 15.4: blocking bounds how much of the Q scan is in flight, never
+    """Blocking bounds how much of the Q scan is in flight, never
     which pair wins. Every existing test uses the default on a matrix smaller than one block,
     so the loop never took a second iteration and a blocking bug would have been invisible."""
     generator = np.random.default_rng(5)

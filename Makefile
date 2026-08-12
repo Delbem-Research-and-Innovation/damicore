@@ -9,7 +9,7 @@ PUBLIC_PACKAGES := damicore_normalizer damicore_distance damicore_tree_builder d
 # The four stage packages, which own one pipeline stage each and must install alone.
 STAGE_PACKAGES := $(filter-out damicore,$(PUBLIC_PACKAGES))
 
-# Modules held to the specification's 95% critical-coverage floor (section 24.5).
+# Modules held to the 95% critical-coverage floor.
 CRITICAL_MODULES := serializer ncd neighbor_joining fastgreedy
 
 DIST_DIR ?= dist

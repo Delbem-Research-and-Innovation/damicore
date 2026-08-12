@@ -19,7 +19,7 @@ from damicore.errors import (
 )
 from damicore.result import DamicoreResult
 
-# Specification section 20 exposes four of the five resource limits as flags. Their values are
+# The CLI exposes four of the five resource limits as flags. Their values are
 # read from the model rather than restated here: ResourceLimits owns them, so raising a limit
 # there cannot leave the CLI clamped at the old one while `damicore.run()` honours the new one.
 # The model is frozen, so one shared instance is safe to read from.

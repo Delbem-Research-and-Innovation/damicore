@@ -1,5 +1,5 @@
-"""Guards that back the specification's public contracts: the CLI exit-status table, the
-configuration bounds, the preflight input checks, and the manifest's own narrowing helpers."""
+"""Guards that back the public contracts: the CLI exit-status table, the configuration
+bounds, the preflight input checks, and the manifest's own narrowing helpers."""
 
 import json
 import os
@@ -26,7 +26,7 @@ from damicore.manifest import atomic_json, json_mapping, json_sequence
 pytestmark = pytest.mark.unit
 
 
-# Specification section 19 maps every public failure onto a CLI exit status. The table is the
+# Every public failure maps onto a CLI exit status. The table is the
 # contract a shell script depends on, so each row pins one status rather than the mapping
 # being re-derived from the class hierarchy at review time.
 EXIT_STATUS_TABLE = [

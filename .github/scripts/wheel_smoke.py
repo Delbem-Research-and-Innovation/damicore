@@ -1,4 +1,4 @@
-"""Smoke an environment built only from wheels (specification section 25.2).
+"""Smoke an environment built only from wheels.
 
 Runs under the target interpreter of a clean virtual environment, so it may import nothing
 beyond the standard library and the installed ``damicore`` distributions. It never imports

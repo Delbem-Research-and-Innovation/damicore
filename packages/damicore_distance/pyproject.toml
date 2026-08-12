@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 # DistanceMatrixView.head() and .to_pandas() are the only pandas users in this package, and
-# section 9.3 requires both. They are an extra so a caller who installs this distribution
+# both are public API. They are an extra so a caller who installs this distribution
 # alone stays on NumPy; damicore depends on damicore-distance[pandas] so the aggregate
 # pipeline always has them.
 [project.optional-dependencies]

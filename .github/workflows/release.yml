@@ -20,8 +20,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Specification section 25.4, step 1: the tag and the five package versions must agree
-  # before step 2 runs anything. Checking the sources costs seconds here; without this gate
+  # Step 1: the tag and the five package versions must agree before anything is built.
+  # Checking the sources costs seconds here; without this gate
   # a mistyped tag is caught only by verify-dist, after the benchmark, check, and test chain
   # has burned about ninety minutes. The build job still re-verifies the built artifacts;
   # this job exists purely to fail fast on the cheap, common mistake.
@@ -53,7 +53,7 @@ jobs:
           dists=$(printf '%s\n' $(make -s print-public-packages) | tr '_' '-' | jq -cRn '[inputs]')
           echo "dists=$dists" >> "$GITHUB_OUTPUT"
 
-  # Specification section 24.4: the 2 GiB resource budget is proven at the tag commit, before
+  # The 2 GiB resource budget is proven at the tag commit, before
   # anything irreversible is published. The object sweep is left out because it asserts no
   # threshold, so it would cost minutes here without being able to fail.
   benchmark:
@@ -84,11 +84,11 @@ jobs:
           echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           echo "PUBLIC_PACKAGES=$(make -s print-public-packages)" >> "$GITHUB_ENV"
 
-      # Specification section 25.4, step 2. The gate is the same one CI runs, by construction.
+      # Step 2. The gate is the same one CI runs, by construction.
       - run: make check
       - run: make test
 
-      # Re-verifies section 25.4 step 1 against the artifacts that will actually be
+      # Re-verifies step 1 against the artifacts that will actually be
       # published rather than the sources they came from; the fast source-level gate is
       # tag-guard. verify-dist rejects a version that any distribution disagrees on, so
       # lockstep and tag agreement are one assertion instead of a loop over the five
