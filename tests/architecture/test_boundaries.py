@@ -101,6 +101,7 @@ def test_public_exports_are_exact() -> None:
         "SpreadsheetSource",
         "FileCorpusSource",
         "NormalizationResult",
+        "NormalizationManifest",
         "ObjectDescriptor",
         "NormalizerError",
     ]
@@ -155,6 +156,52 @@ def test_public_exports_are_exact() -> None:
         "ArtifactValidationError",
         "MaterializationError",
     }
+
+
+# Every symbol the aggregate reaches for inside a stage package, rather than through that
+# package's public surface. The set is closed, and this is the only thing that closes it: the
+# distributions install independently and are pinned by range, so a stage may release a patch
+# that moves one of these while `test_public_exports_are_exact` above stays green and every
+# in-repo run keeps passing -- the workspace only ever resolves them together. Nothing here is
+# a promise to users; it is a list of couplings that must not move quietly.
+INTERNAL_STAGE_COUPLING = {
+    # Preflight and the run share one traversal, so the projection is exact rather than
+    # sampled. There is no public entry point for "measure without writing".
+    "damicore_normalizer.api:scan_source",
+    # The discriminated union of the source axis, carried as a config value.
+    "damicore_normalizer.config:ObjectSource",
+    # The progress protocol the distance stage calls back on.
+    "damicore_distance.api:ProgressCallback",
+}
+
+
+def _deep_stage_imports(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    reached: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        head, _, tail = node.module.partition(".")
+        if head in STAGES and tail:
+            reached.update(f"{node.module}:{alias.name}" for alias in node.names)
+    return reached
+
+
+def test_the_aggregate_reaches_into_stage_internals_only_where_declared() -> None:
+    """A public symbol is reached through its package; anything else is listed above.
+
+    Two failures this catches, and they need different fixes. A symbol appearing here that is
+    already exported means the import took the long way round and should go through the
+    package. A genuinely new one means the aggregate grew a dependency on another
+    distribution's internals, which is a decision -- publish it, or accept it here.
+    """
+    source = ROOT / "packages/damicore/src/damicore"
+    modules = [path for path in source.rglob("*.py") if "__pycache__" not in path.parts]
+    assert modules
+    reached: set[str] = set()
+    for module in modules:
+        reached |= _deep_stage_imports(module)
+    assert reached == INTERNAL_STAGE_COUPLING, sorted(reached ^ INTERNAL_STAGE_COUPLING)
 
 
 def test_public_result_models_declare_the_specified_fields() -> None:

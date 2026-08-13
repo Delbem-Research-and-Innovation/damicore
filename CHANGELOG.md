@@ -42,6 +42,9 @@ carries anything else, a date included, matches neither and fails the release.
   identical object bytes.
 - `object_encoding` in the normalization manifest (`json-lines/1` or `raw-bytes/1`), so a
   distance is attributable to the bytes it measured.
+- `NormalizationManifest` in `damicore_normalizer`'s public surface. It was already the
+  documented contract between stages, so validating `manifest.json` no longer means reaching
+  past the package's public API to do it.
 - `openpyxl>=3.1,<4` as a runtime dependency of `damicore-normalizer`.
 - ADRs 0006-0010 recording the source axis, run self-containment, the named object
   encoding, the spreadsheet engine, and the cell-text rule.

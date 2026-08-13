@@ -31,6 +31,7 @@ from damicore_normalizer import (
     DelimitedSource,
     FileCorpusSource,
     NormalizationConfig,
+    NormalizationManifest,
     NormalizationResult,
     NormalizerError,
     ObjectDescriptor,
@@ -38,7 +39,6 @@ from damicore_normalizer import (
     materialize_objects,
 )
 from damicore_normalizer.config import ObjectSource
-from damicore_normalizer.manifest import NormalizationManifest
 from damicore_tree_builder import (
     Tree,
     TreeBuildConfig,

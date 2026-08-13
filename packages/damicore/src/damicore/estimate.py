@@ -6,9 +6,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
+from damicore_normalizer import NormalizationConfig, NormalizerError
 from damicore_normalizer.api import scan_source
-from damicore_normalizer.config import NormalizationConfig, ObjectSource
-from damicore_normalizer.errors import NormalizerError
+from damicore_normalizer.config import ObjectSource
 from pydantic import BaseModel, ConfigDict, Field
 
 from damicore.config import ExecutionConfig
