@@ -10,9 +10,19 @@ abstract: >-
 type: software
 license: Apache-2.0
 authors:
-  - given-names: Ennio
-    family-names: Politi Lopes
+  - given-names: Ennio Politi
+    family-names: Lopes
     email: enniolopes@gmail.com
+    affiliation: Universidade de Sao Paulo
+    orcid: "https://orcid.org/0000-0003-2059-8313"
+  - given-names: Eric Keiji
+    family-names: Tokuda
+    affiliation: Universidade de Sao Paulo
+    orcid: "https://orcid.org/0000-0002-6159-2500"
+  - given-names: Alexandre Cláudio Botazzo
+    family-names: Delbem
+    affiliation: Universidade de Sao Paulo
+    orcid: "https://orcid.org/0000-0003-1810-1742"
 repository-code: https://github.com/Delbem-Research-and-Innovation/damicore
 url: https://pypi.org/project/damicore/
 version: 0.1.0
