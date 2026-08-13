@@ -157,6 +157,11 @@ def _two_paths_for_one_dataset(tmp_path: Path) -> None:
     materialize_objects([tmp_path / "one.csv", tmp_path / "two.csv"], tmp_path / "out")
 
 
+def _a_bytes_path(tmp_path: Path) -> None:
+    # bytes satisfies Sequence, so without a check each byte is taken for a path of its own.
+    materialize_objects(b"/tmp/dataset.csv", tmp_path / "out")  # pyright: ignore[reportArgumentType]
+
+
 def _a_corpus_through_the_delimited_wrapper(tmp_path: Path) -> None:
     normalize_csv(
         _csv(tmp_path),
@@ -177,6 +182,7 @@ def _a_corpus_through_the_delimited_wrapper(tmp_path: Path) -> None:
         pytest.param(
             _two_paths_for_one_dataset, "takes exactly one file", id="several-paths-one-dataset"
         ),
+        pytest.param(_a_bytes_path, "must be a string or a path", id="bytes-instead-of-a-path"),
         pytest.param(
             _a_corpus_through_the_delimited_wrapper,
             "only accepts a delimited source",

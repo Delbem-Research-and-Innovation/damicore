@@ -6,6 +6,7 @@ import os
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 from damicore_normalizer.config import (
     DelimitedSource,
@@ -59,10 +60,27 @@ def _atomic_json(path: Path, value: object) -> None:
 
 
 def _resolved_paths(source: str | Path | Sequence[str | Path]) -> tuple[Path, ...]:
-    entries = [source] if isinstance(source, (str, Path)) else list(source)
+    """Normalize the caller's source argument into resolved paths, rejecting anything else.
+
+    A public boundary, so the entries are checked rather than assumed: the annotation binds a
+    type checker, not a notebook. ``bytes`` is the case that matters, because it satisfies
+    ``Sequence`` and would otherwise be taken apart into one integer per byte, each of which
+    fails deep inside ``Path`` with a message about ``int``.
+    """
+    entries: list[object] = (
+        [source] if isinstance(source, (str, Path)) else list(cast(Sequence[object], source))
+    )
     if not entries:
         raise NormalizerError("No input path was given", code="input_validation_error")
-    return tuple(Path(entry).resolve() for entry in entries)
+    paths: list[Path] = []
+    for entry in entries:
+        if not isinstance(entry, (str, Path)):
+            raise NormalizerError(
+                f"Input path must be a string or a path, not {type(entry).__name__}",
+                code="input_validation_error",
+            )
+        paths.append(Path(entry).resolve())
+    return tuple(paths)
 
 
 def _dataset_path(paths: tuple[Path, ...]) -> Path:
