@@ -37,6 +37,9 @@ select = ["E", "F", "I", "RUF100", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages", "tests"]
+# Using a marker outside the registry below is a collection error, not a warning:
+# the registry is a contract only if a name outside it fails.
+addopts = "--strict-markers"
 markers = [
     "unit: fast isolated unit tests",
     "contract: cross-package contract tests",

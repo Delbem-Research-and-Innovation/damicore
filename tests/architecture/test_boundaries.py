@@ -569,6 +569,28 @@ def test_every_test_module_declares_a_registered_marker() -> None:
     assert not unregistered, unregistered
 
 
+def test_marker_registration_is_enforced_rather_than_advisory() -> None:
+    """The registry above only means something if using a marker outside it fails.
+
+    Without `--strict-markers`, `pytest.mark.contarct` marks nothing, reports a warning that
+    scrolls past in a green run, and leaves the test silently unselectable by the name its
+    author meant. The flag turns that into a collection error, which is what makes the
+    registry a contract instead of a list. Required in every configuration a suite is run
+    from, because pytest reads exactly one of them per invocation.
+    """
+    configurations = [ROOT / "pyproject.toml"] + [
+        directory / "pyproject.toml"
+        for directory in sorted((ROOT / "packages").iterdir())
+        if (directory / "pyproject.toml").is_file()
+    ]
+    assert len(configurations) > len(PUBLIC), configurations
+    for path in configurations:
+        options = cast(dict[str, object], _tool(path)["pytest"])["ini_options"]
+        assert isinstance(options, dict)
+        addopts = str(cast(dict[str, object], options).get("addopts", ""))
+        assert "--strict-markers" in addopts, path.relative_to(ROOT).as_posix()
+
+
 def test_type_check_configuration_covers_every_workspace_package() -> None:
     """Guard the type gate against silently checking nothing.
 
