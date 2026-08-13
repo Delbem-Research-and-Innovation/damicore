@@ -210,6 +210,22 @@ def test_a_symlinked_entry_is_refused_rather_than_followed(tmp_path: Path) -> No
     assert raised.value.code == "corpus_validation_error"
 
 
+def test_a_symlinked_source_directory_is_followed_to_what_it_points_at(tmp_path: Path) -> None:
+    """The symlink rule governs corpus entries, not the path the user names. A source path is
+    resolved before the corpus is read, so naming a linked directory adopts the files behind
+    it -- refusing that would reject an ordinary way of referring to a dataset while the bytes
+    are copied into the run directory either way. Pinned here because a guard against it would
+    be unreachable code that reads as protection."""
+    corpus = _corpus(tmp_path / "corpus", {"a.txt": b"alpha\n", "b.txt": b"beta\n"})
+    link = tmp_path / "link"
+    link.symlink_to(corpus, target_is_directory=True)
+
+    result = materialize_objects(link, tmp_path / "out", config=CORPUS)
+
+    assert [item.label for item in result.objects] == ["a.txt", "b.txt"]
+    assert (tmp_path / "out/objects/file_000001").read_bytes() == b"alpha\n"
+
+
 def test_a_non_regular_entry_is_refused(tmp_path: Path) -> None:
     corpus = _corpus(tmp_path / "corpus", {"a.txt": b"alpha\n", "b.txt": b"beta\n"})
     os.mkfifo(corpus / "pipe")

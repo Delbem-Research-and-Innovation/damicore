@@ -49,11 +49,12 @@ def _collect(sources: Sequence[Path], source: FileCorpusSource) -> tuple[Path, l
     The root is the given directory when a single directory was requested, so labels read the
     way the user asked for them. For any other shape it is the common ancestor of the files
     themselves, which is the only choice that keeps every label distinct.
+
+    ``sources`` arrives already resolved, so a source path never reaches here as a symlink and
+    the symlink rule applies to the entries found beneath it, in :func:`_walk`.
     """
     files: list[Path] = []
     for entry in sources:
-        if entry.is_symlink():
-            raise _reject(f"Corpus path is a symlink: {entry}")
         if entry.is_dir():
             files.extend(_walk(entry, recursive=source.recursive))
         elif entry.exists():
