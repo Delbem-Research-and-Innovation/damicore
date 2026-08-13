@@ -832,8 +832,13 @@ def run(
             if normalization_dir.exists():
                 shutil.rmtree(normalization_dir)
             started = journal.stage_started("normalizing", list(preview.source_paths))
+            # The caller's own argument, not the file list preflight expanded from it. A
+            # corpus labels its objects relative to what was requested, so handing back the
+            # expanded files would re-derive that root from the files themselves: a corpus
+            # whose files all sit in one subdirectory would be labelled without it, and the
+            # set digest -- which covers labels -- would then disagree with preflight's.
             normalization = materialize_objects(
-                preview.source_paths,
+                source,
                 normalization_dir,
                 config=normalization_config,
             )

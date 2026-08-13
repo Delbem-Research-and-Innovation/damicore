@@ -141,6 +141,37 @@ def test_a_corpus_run_is_reproducible_byte_for_byte(tmp_path: Path) -> None:
         ).read_bytes(), artifact
 
 
+def test_a_corpus_nested_in_one_subdirectory_keeps_the_requested_root(tmp_path: Path) -> None:
+    """Labels are relative to the directory that was asked for, not to wherever the files
+    happen to share an ancestor.
+
+    Preflight expands a directory into its files. Handing that expansion back to the
+    materialization step re-derives the root from the files themselves, so a corpus whose
+    files all sit under one subdirectory loses that path component; the set digest covers
+    labels, so preflight and the run then disagree and a legitimate corpus fails outright.
+    """
+    corpus = tmp_path / "corpus"
+    (corpus / "sub").mkdir(parents=True)
+    (corpus / "sub/a.bin").write_bytes(b"alpha content here\n" * 4)
+    (corpus / "sub/b.bin").write_bytes(b"beta content here\n" * 4)
+
+    preview = estimate(corpus, source_kind="files")
+    result = run(
+        corpus,
+        source_kind="files",
+        output_dir=tmp_path / "run",
+        progress=False,
+        execution=SERIAL,
+    )
+    try:
+        assert sorted(result.membership["label"]) == ["sub/a.bin", "sub/b.bin"]
+    finally:
+        result.close()
+
+    manifest = json.loads((tmp_path / "run/manifest.json").read_text(encoding="utf-8"))
+    assert manifest["input"]["sha256"] == preview.input_sha256
+
+
 def test_a_worksheet_runs_end_to_end_and_records_its_sheet(tmp_path: Path) -> None:
     book = _workbook(tmp_path / "book.xlsx")
     result = run(
