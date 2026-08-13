@@ -1,4 +1,4 @@
-"""Assert that a version agrees with every public package and the changelog.
+"""Assert that a version agrees with every public package, the changelog and the citation.
 
 One definition for the two workflows that gate on it: release.yml's tag-guard checks the
 version a tag names before the expensive chain runs, and auto-tag.yml checks the version
@@ -33,10 +33,27 @@ def main() -> int:
             mismatches.append(
                 f"CHANGELOG.md: no '## {expected}' section for this version"
             )
+    # CITATION.cff states the version a citation refers to, which makes it a seventh copy
+    # of the released number and the only one no packaging tool would ever notice drifting.
+    # Parsed by line rather than with a YAML library: this runs on the stock interpreter of
+    # the runner, before uv exists, which is what makes it the cheap gate.
+    with open("CITATION.cff", encoding="utf-8") as handle:
+        declared = [
+            line.partition(":")[2].strip().strip("\"'")
+            for line in handle.read().splitlines()
+            if line.startswith("version:")
+        ]
+    if declared != [expected]:
+        mismatches.append(
+            f"CITATION.cff: version {declared or 'absent'} != expected version {expected}"
+        )
     if mismatches:
         print("\n".join(mismatches), file=sys.stderr)
         return 1
-    print(f"all {len(packages)} package versions and the changelog agree on {expected}")
+    print(
+        f"all {len(packages)} package versions, the changelog and the citation "
+        f"agree on {expected}"
+    )
     return 0
 
 
