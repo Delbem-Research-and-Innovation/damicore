@@ -153,6 +153,29 @@ def test_recursion_and_hidden_files_follow_the_declared_policy(tmp_path: Path) -
     assert manifest["input"]["include_hidden"] is False
 
 
+def test_measuring_a_corpus_without_writing_agrees_with_materializing_it(tmp_path: Path) -> None:
+    """Preflight calls this traversal with no destination; a run calls the same one with one.
+
+    The projection a caller is asked to approve is only worth anything if it is the run's own
+    arithmetic, so what is asserted is agreement -- identifiers, labels, sizes and digests --
+    rather than the measurement in isolation. Exercised here rather than only through the
+    orchestrator's preflight, because this is the package a change to it is validated in.
+    """
+    import damicore_normalizer.file_corpus as file_corpus
+
+    corpus = _corpus(tmp_path / "corpus", {"a.txt": b"alpha\n" * 3, "nested/b.txt": b"beta\n" * 5})
+
+    before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
+    measured = file_corpus.scan_corpus((corpus,), FileCorpusSource())
+    assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == before
+
+    written = materialize_objects(corpus, tmp_path / "out", config=CORPUS)
+    assert [item.model_dump() for item in measured.objects] == [
+        item.model_dump() for item in written.objects
+    ]
+    assert measured.total_bytes == written.total_bytes
+
+
 def _one_file(root: Path) -> Path:
     return _corpus(root, {"only.txt": b"one\n"})
 
