@@ -700,7 +700,8 @@ def test_no_symlink_check_sits_behind_a_resolve_call() -> None:
         visitor = _ResolvedThenTested()
         visitor.visit(ast.parse(module.read_text(encoding="utf-8"), filename=str(module)))
         dead.extend(
-            f"{module.relative_to(ROOT)}:{line} tests {name}.is_symlink() after {name} = ….resolve()"
+            f"{module.relative_to(ROOT)}:{line} tests {name}.is_symlink(), "
+            f"but {name} came from a resolve() call"
             for name, line in visitor.hits
         )
     assert not dead, dead
