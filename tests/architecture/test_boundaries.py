@@ -328,7 +328,9 @@ def test_the_aggregate_requires_the_pandas_extra_of_the_distance_package() -> No
     version = _version("damicore")
     major, minor, _ = _release(version)
     ceiling = f"<{major}.{minor + 1}.0"
-    assert f"damicore-distance[pandas]>={version},{ceiling}" in _dependencies("damicore")
+    assert f"damicore-distance[pandas]>={version},{ceiling}" in _dependencies(
+        "damicore"
+    )
 
 
 def test_public_packages_declare_one_lockstep_version() -> None:

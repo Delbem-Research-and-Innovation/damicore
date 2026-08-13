@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from damicore import ExecutionConfig, ResourceLimits, estimate, run
-from damicore_normalizer import NormalizationConfig, normalize_csv
+from damicore_normalizer import DelimitedSource, NormalizationConfig, normalize_csv
 from synthetic_data import generate_csv
 
 # Roughly geometric, because Neighbor Joining is cubic in the object count: each step costs
@@ -134,7 +134,7 @@ def main() -> None:
         normalization = normalize_csv(
             large_path,
             arguments.directory / "large-normalization",
-            config=NormalizationConfig(split="columns"),
+            config=NormalizationConfig(source=DelimitedSource(split="columns")),
         )
         normalization_seconds = time.monotonic() - started
         normalization_peak_rss = _peak_rss_bytes()

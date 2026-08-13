@@ -6,9 +6,9 @@ import json
 import logging
 import shutil
 import sys
+from collections.abc import Sequence
 from importlib import metadata
 from pathlib import Path
-from collections.abc import Sequence
 from typing import Any, Literal
 
 import numpy as np

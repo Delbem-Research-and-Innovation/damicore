@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,15 +20,20 @@ CELL_TEXT_RULE = "v1"
 # The closed set of Python types a worksheet read with ``values_only=True`` can yield. It is
 # what makes ``cell_text`` total: the coercion has a finite domain to span, so a type outside
 # it is a static error here rather than an unhandled value at runtime.
-CellValue = (
-    str | int | float | bool | dt.datetime | dt.date | dt.time | dt.timedelta | None
-)
+CellValue = str | int | float | bool | dt.datetime | dt.date | dt.time | dt.timedelta | None
 
-# openpyxl raises these when it cannot make sense of a workbook: a file that is not a
-# zip container, an encrypted one, or a member the reader cannot parse. They are caught as
-# a set so a malformed workbook is one typed failure rather than whichever library
-# exception happened to surface.
-_WORKBOOK_FAILURES = (OSError, ValueError, KeyError, TypeError, InvalidFileException)
+# openpyxl raises these when it cannot make sense of a workbook: a file that is not a zip
+# container (BadZipFile, which derives straight from Exception rather than OSError), an
+# encrypted one, or a member the reader cannot parse. They are caught as a set so a malformed
+# workbook is one typed failure rather than whichever library exception happened to surface.
+_WORKBOOK_FAILURES = (
+    OSError,
+    ValueError,
+    KeyError,
+    TypeError,
+    zipfile.BadZipFile,
+    InvalidFileException,
+)
 
 
 @dataclass(frozen=True)
@@ -90,6 +96,15 @@ def cell_text(value: CellValue) -> str:
 
 
 def _open(path: Path) -> Workbook:
+    if path.suffix.lower() == ".xls":
+        # Named before openpyxl reports it as an unreadable container, because the useful
+        # answer is a one-step conversion rather than a parse failure. Legacy BIFF is out of
+        # scope; see docs/decisions/0009-spreadsheet-engine.md.
+        raise NormalizerError(
+            f"Legacy .xls workbooks are not supported: {path.name}. Convert it to .xlsx and "
+            "read that instead.",
+            code="dataset_format_error",
+        )
     try:
         # data_only=False on purpose: the cached alternative returns nothing for a workbook
         # the spreadsheet application never recalculated, which would turn a formula into a
@@ -144,10 +159,10 @@ def _used_range(path: Path, sheet: str) -> _UsedRange:
     try:
         worksheet = workbook[sheet]
         for number, row in enumerate(worksheet.iter_rows(values_only=True), start=1):
-            first = next((index for index, value in enumerate(row, start=1) if value is not None), 0)
-            if first == 0:
+            filled = [index for index, value in enumerate(row, start=1) if value is not None]
+            if not filled:
                 continue
-            last = max(index for index, value in enumerate(row, start=1) if value is not None)
+            first, last = filled[0], filled[-1]
             minimum_row = minimum_row or number
             maximum_row = number
             minimum_column = min(minimum_column or first, first)

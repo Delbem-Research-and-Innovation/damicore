@@ -88,8 +88,7 @@ def _validate_record_widths(path: Path, source: DelimitedSource, width: int) -> 
             for number, record in enumerate(reader, start=2):
                 if record and len(record) != width:
                     raise NormalizerError(
-                        f"Line {number} has {len(record)} fields but the header declares "
-                        f"{width}",
+                        f"Line {number} has {len(record)} fields but the header declares {width}",
                         code="dataset_format_error",
                     )
     except (OSError, UnicodeError, csv.Error) as exc:

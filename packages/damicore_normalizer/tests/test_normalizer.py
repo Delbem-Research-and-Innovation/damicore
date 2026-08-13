@@ -10,7 +10,6 @@ from pydantic import ValidationError
 import damicore_normalizer.api as api
 import damicore_normalizer.delimited_reader as delimited_reader
 import damicore_normalizer.table_split as table_split
-from damicore_normalizer.scan import ScanResult
 from damicore_normalizer import (
     DelimitedSource,
     NormalizationConfig,
@@ -18,6 +17,7 @@ from damicore_normalizer import (
     ObjectDescriptor,
     normalize_csv,
 )
+from damicore_normalizer.scan import ScanResult
 
 pytestmark = pytest.mark.unit
 
@@ -77,10 +77,16 @@ INPUT_CONTRACT_VIOLATIONS = [
     pytest.param(
         "a,a\n1,2\n", "columns", "dataset_format_error", "unique", id="duplicate-header-names"
     ),
-    pytest.param(",b\n1,2\n", "columns", "dataset_format_error", "non-empty", id="empty-header-name"),
+    pytest.param(
+        ",b\n1,2\n", "columns", "dataset_format_error", "non-empty", id="empty-header-name"
+    ),
     pytest.param("a,b\n", "columns", "dataset_format_error", "enough data rows", id="no-data-rows"),
     pytest.param(
-        "a\n1\n2\n", "columns", "dataset_format_error", "two columns", id="one-column-columns-split"
+        "a\n1\n2\n",
+        "columns",
+        "dataset_format_error",
+        "two columns",
+        id="one-column-columns-split",
     ),
     pytest.param(
         "a,b\n1,2\n",
@@ -164,7 +170,9 @@ MALFORMED_INPUTS = [
     pytest.param(
         b"a,b,c\n1,2,3\n4,5\n", "Line 3 has 2 fields", id="later-row-narrower-than-header"
     ),
-    pytest.param(b"a,\xffb\n1,2\n", "Could not read a valid delimited header", id="undecodable-header"),
+    pytest.param(
+        b"a,\xffb\n1,2\n", "Could not read a valid delimited header", id="undecodable-header"
+    ),
     pytest.param(
         b"a,b\n1,2\n\xff,4\n", "Could not read a valid delimited header", id="undecodable-data-row"
     ),

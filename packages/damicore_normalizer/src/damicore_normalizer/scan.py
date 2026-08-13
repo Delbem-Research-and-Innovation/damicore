@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from damicore_normalizer.manifest import NormalizationInput, ObjectDescriptor
+from damicore_normalizer.manifest import (
+    NormalizationInput,
+    ObjectDescriptor,
+    ObjectEncoding,
+)
 
 
 @dataclass(frozen=True)
@@ -21,7 +25,7 @@ class ScanResult:
     max_serialized_chunk_bytes: int
     record_count: int
     manifest_input: NormalizationInput
-    object_encoding: str
+    object_encoding: ObjectEncoding
     source_paths: tuple[Path, ...]
     # (size_bytes, mtime_ns) observed for each source path while it was being read. The
     # caller re-stats the same paths afterwards, which is how a set of inputs gets the drift

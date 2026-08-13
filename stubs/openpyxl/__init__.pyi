@@ -14,10 +14,11 @@ type outside it is a type error here before it can become an unhandled value at 
 
 import datetime as _datetime
 from os import PathLike
+from typing import TypeAlias
 
 from openpyxl.worksheet.worksheet import Worksheet
 
-CellValue = (
+CellValue: TypeAlias = (
     str
     | int
     | float

@@ -5,17 +5,16 @@ verification, and the manifest totality rules.
 
 import json
 import os
-from pathlib import Path
-from typing import Any, Literal
-
 from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 import pytest
-from damicore_normalizer.config import ObjectSource
 from damicore_clusterizer import ClusterConfig, ClusterizerError, ClusterResult
 from damicore_distance import DistanceConfig, DistanceError, DistanceResult
 from damicore_distance.api import ProgressCallback
 from damicore_normalizer import NormalizationConfig, NormalizationResult, NormalizerError
+from damicore_normalizer.config import ObjectSource
 from pydantic import ValidationError
 
 import damicore.api as api

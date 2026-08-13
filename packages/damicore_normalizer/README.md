@@ -28,9 +28,7 @@ from damicore_normalizer import (
 result = materialize_objects(
     "dataset.csv",
     "normalization",
-    config=NormalizationConfig(
-        source=DelimitedSource(split="columns"), chunk_rows=50_000
-    ),
+    config=NormalizationConfig(source=DelimitedSource(split="columns"), chunk_rows=50_000),
 )
 
 # Split a worksheet. `sheet` is required when the workbook holds more than one.

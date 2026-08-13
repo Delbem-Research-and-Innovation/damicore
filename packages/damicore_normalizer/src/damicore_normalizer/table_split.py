@@ -127,7 +127,9 @@ def split_table(
             pool.close()
 
     if row_count == 0 or (split == "rows" and row_count < 2):
-        raise NormalizerError("Dataset does not contain enough data rows", code="dataset_format_error")
+        raise NormalizerError(
+            "Dataset does not contain enough data rows", code="dataset_format_error"
+        )
 
     if split == "columns":
         objects = tuple(
