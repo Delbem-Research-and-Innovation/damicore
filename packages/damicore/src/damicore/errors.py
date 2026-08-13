@@ -44,9 +44,10 @@ class ResourceLimitError(DamicoreError):
     """Preflight projected a run outside the configured ``ResourceLimits``.
 
     ``context["estimate"]`` holds the ``ResourceEstimate``, whose ``violations`` names every
-    gate that failed. Reshape the split or reduce the input; individual limits may be raised
-    through ``ExecutionConfig.limits`` after reviewing ``estimate()``, but the free-disk gate
-    is always enforced.
+    gate that failed. Reshape the source -- a different split for a dataset, fewer files for a
+    corpus -- or reduce the input; individual limits may be raised through
+    ``ExecutionConfig.limits`` after reviewing ``estimate()``, but the free-disk gate is
+    always enforced.
     """
 
 

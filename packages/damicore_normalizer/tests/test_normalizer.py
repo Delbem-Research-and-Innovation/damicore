@@ -17,9 +17,34 @@ from damicore_normalizer import (
     ObjectDescriptor,
     normalize_csv,
 )
+from damicore_normalizer.manifest import NormalizationManifest
 from damicore_normalizer.scan import ScanResult
 
 pytestmark = pytest.mark.unit
+
+
+# The two input blocks the encoding rule discriminates on, kept minimal: only `kind` and the
+# fields each variant requires, since the rule reads nothing else.
+_MANIFEST_INPUTS: dict[str, dict[str, object]] = {
+    "delimited": {
+        "kind": "delimited",
+        "path": "/tmp/dataset.csv",
+        "sha256": "b" * 64,
+        "size_bytes": 10,
+        "delimiter": ",",
+        "encoding": "utf-8",
+        "split": "columns",
+    },
+    "files": {
+        "kind": "files",
+        "root": "/tmp/corpus",
+        "sha256": "c" * 64,
+        "size_bytes": 10,
+        "file_count": 2,
+        "recursive": True,
+        "include_hidden": False,
+    },
+}
 
 
 def _split(value: str) -> Literal["columns", "rows"]:
@@ -445,3 +470,43 @@ def test_scanning_without_an_objects_dir_measures_without_writing(
     assert result.record_count == 2
     assert result.max_serialized_chunk_bytes == expected_max_chunk
     assert list(tmp_path.iterdir()) == [source]
+
+
+# The manifest is the inter-stage contract, and an NCD value is only meaningful relative to
+# the bytes it measured, so a manifest that names the wrong encoding for its source
+# misattributes every distance computed from it. Each row is one (source kind, encoding)
+# pairing and whether the manifest may express it; the two rejected rows are the ones no
+# other check can catch, because a mislabelled manifest is structurally valid otherwise.
+@pytest.mark.parametrize(
+    ("kind", "encoding", "accepted"),
+    [
+        pytest.param("delimited", "json-lines/1", True, id="delimited-json-lines"),
+        pytest.param("files", "raw-bytes/1", True, id="files-raw-bytes"),
+        pytest.param("delimited", "raw-bytes/1", False, id="delimited-must-not-claim-raw"),
+        pytest.param("files", "json-lines/1", False, id="files-must-not-claim-json-lines"),
+    ],
+)
+def test_a_manifest_may_only_name_the_encoding_its_source_produces(
+    kind: str, encoding: str, accepted: bool
+) -> None:
+    payload = {
+        "schema_version": 2,
+        "object_encoding": encoding,
+        "input": _MANIFEST_INPUTS[kind],
+        "objects": [
+            {
+                "object_id": "object_000001",
+                "label": "one",
+                "relative_path": "objects/object_000001",
+                "size_bytes": 3,
+                "sha256": "a" * 64,
+            }
+        ],
+    }
+    # Parsed from JSON text, which is how both consumers read a manifest from disk.
+    document = json.dumps(payload)
+    if accepted:
+        assert NormalizationManifest.model_validate_json(document).object_encoding == encoding
+        return
+    with pytest.raises(ValidationError, match="must carry object_encoding"):
+        NormalizationManifest.model_validate_json(document)

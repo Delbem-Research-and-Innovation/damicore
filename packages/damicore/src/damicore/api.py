@@ -94,16 +94,20 @@ SCHEMA_VERSION = 2
 VERSION = metadata.version("damicore")
 logger = logging.getLogger(__name__)
 
-# ResourceLimitError itself carries the distinction between CSV size and object count,
-# because that is what tells a caller whether the run is reshapable at all: a wider CSV
-# stays feasible, more rows does not.
+# ResourceLimitError carries the distinction between input size and object count, because
+# that is what tells a caller whether the run is reshapable at all. The guidance names how
+# each source produces objects rather than assuming a split: a corpus has none, so advice
+# phrased purely in splits would be unactionable for the source that most easily trips the
+# object cap.
 _SCALE_GUIDANCE = (
-    "NCD is quadratic and Neighbor Joining cubic in the object count, so a multi-gigabyte CSV "
-    "stays feasible while the object count is moderate, which is the usual case for "
-    "split='columns'. Streaming and memory maps bound RAM but not that work, so split='rows' "
-    "over a large file creates one object per row and is rejected here rather than later. "
-    "Reshape the split, reduce the input, or raise individual ResourceLimits after reviewing "
-    "estimate(); free disk is never bypassed."
+    "NCD is quadratic and Neighbor Joining cubic in the object count, so what decides "
+    "feasibility is how many objects the source produces, not how many bytes it holds. A "
+    "multi-gigabyte dataset stays feasible while that count is moderate, which is the usual "
+    "case for split='columns'; split='rows' over the same file creates one object per row. A "
+    "files source creates one object per file, so its object count is the size of the corpus. "
+    "Streaming and memory maps bound RAM but not that work, which is why this is rejected "
+    "here rather than later. Reshape the source, reduce the input, or raise individual "
+    "ResourceLimits after reviewing estimate(); free disk is never bypassed."
 )
 
 
