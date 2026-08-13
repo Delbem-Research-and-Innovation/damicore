@@ -40,7 +40,17 @@ select = ["E", "F", "I", "RUF100", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = ["unit: fast isolated unit tests"]
+# The whole workspace marker registry, restated because pytest resolves ini options from
+# the rootdir of the invocation and inherits nothing from a parent: a marker missing here
+# makes `-m` select nothing in a package-scoped run. Held equal to the root list by
+# tests/architecture/test_boundaries.py.
+markers = [
+    "unit: fast isolated unit tests",
+    "contract: cross-package contract tests",
+    "e2e: complete pipeline tests",
+    "notebook: executable notebook tests",
+    "slow: stress and benchmark-adjacent tests",
+]
 # --cov-branch and the floor mirror the root configuration on purpose: coverage resolves
 # its config from the working directory, so a package-scoped run would otherwise report
 # line coverage with no threshold and read as a stronger result than it is.

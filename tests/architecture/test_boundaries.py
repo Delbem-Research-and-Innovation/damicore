@@ -514,6 +514,17 @@ def test_every_test_module_declares_a_registered_marker() -> None:
 
     The registered set is read from the root configuration rather than restated, so adding a
     marker there is the only edit needed to make it usable.
+
+    Registered in **both** scopes a suite runs in. Pytest resolves its configuration from the
+    rootdir of the invocation and inherits nothing from a parent, so a member's own
+    `[tool.pytest.ini_options]` is the whole registry for `make -C packages/<name> test` --
+    the command AGENTS.md sends a change to first.
+
+    What registration buys is not selection: `-m contract` matches a mark whether or not it
+    is declared. It is the ability to tell a marker from a typo. Only a registered set makes
+    `pytest.mark.contarct` reportable -- as a warning, and as a collection error under
+    `--strict-markers` -- so a member missing a marker cannot distinguish the two in the one
+    scope where its own tests are usually run.
     """
     configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     pytest_options = configuration["tool"]["pytest"]["ini_options"]
@@ -522,6 +533,19 @@ def test_every_test_module_declares_a_registered_marker() -> None:
     registered = {
         str(entry).split(":", 1)[0].strip() for entry in cast(list[object], declared_markers)
     }
+
+    members = sorted(
+        directory
+        for directory in (ROOT / "packages").iterdir()
+        if (directory / "pyproject.toml").is_file()
+    )
+    assert len(members) >= len(PUBLIC), members
+    for member in members:
+        options = _tool(member / "pyproject.toml")["pytest"]
+        assert isinstance(options, dict)
+        member_markers = cast(dict[str, object], options)["ini_options"]
+        assert isinstance(member_markers, dict)
+        assert cast(dict[str, object], member_markers)["markers"] == declared_markers, member.name
 
     modules = sorted(ROOT.glob("packages/*/tests/test_*.py")) + sorted(
         ROOT.glob("tests/*/test_*.py")
