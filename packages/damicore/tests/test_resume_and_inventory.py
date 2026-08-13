@@ -437,6 +437,28 @@ def test_an_artifact_reached_through_a_symlinked_directory_is_rejected(tmp_path:
         load_result(output)
 
 
+def test_an_artifact_symlinked_within_the_run_directory_is_read(tmp_path: Path) -> None:
+    """What the loader enforces is containment, not file kind.
+
+    An inventory entry is resolved before it is checked, so a link and the file it points at
+    are the same path by the time any guard sees them: inside the run directory both are read,
+    and both still have to match the size and digest the inventory recorded. The test above
+    covers the case that matters -- resolving *outside* the run directory -- and this one pins
+    the complement, so nothing here can grow a guard that cannot fire.
+    """
+    output = tmp_path / "run"
+    result = run(_csv(tmp_path), output_dir=output, progress=False, execution=_single_worker())
+    result.close()
+    os.symlink(output / "report.json", output / "report-link.json")
+    manifest_path = output / "manifest.json"
+    manifest = _read_json(manifest_path)
+    manifest["artifacts"]["report-link.json"] = artifact_record(output / "report-link.json", output)
+    _write_json(manifest_path, manifest)
+
+    loaded = load_result(output)
+    loaded.close()
+
+
 def test_a_report_that_is_not_completed_is_rejected(tmp_path: Path) -> None:
     """The manifest and the report both record the outcome. A result may only load when they
     agree, otherwise a failed run whose manifest was patched would load as a valid result."""

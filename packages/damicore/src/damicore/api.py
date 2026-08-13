@@ -1064,10 +1064,14 @@ def load_result(output_dir: str | Path) -> DamicoreResult:
     """Load and verify a completed DAMICORE result without executing artifact code.
 
     Every artifact the manifest declares is re-checked against its recorded size and SHA-256,
-    and any entry that is absolute, escapes the run directory, or is a symlink is rejected
-    before it is read. The matrix is memory-mapped with ``allow_pickle=False``, so no artifact
-    can execute code on load. Only runs whose manifest and report both say ``completed``, at
-    the current schema version, can be loaded; a failed or interrupted run is diagnostic only.
+    and any entry that is absolute or resolves outside the run directory is rejected before it
+    is read. Containment is the rule, not file kind: an entry is resolved before it is checked,
+    so a link and the file it points at are one path by then -- a link out of the directory is
+    refused because its target is outside, and one within it is read like any other artifact,
+    its bytes still held to the recorded digest. The matrix is memory-mapped with
+    ``allow_pickle=False``, so no artifact can execute code on load. Only runs whose manifest
+    and report both say ``completed``, at the current schema version, can be loaded; a failed
+    or interrupted run is diagnostic only.
 
     Returns
     -------
@@ -1095,7 +1099,6 @@ def load_result(output_dir: str | Path) -> DamicoreResult:
                 relative.is_absolute()
                 or ".." in relative.parts
                 or not candidate.is_relative_to(run_dir)
-                or candidate.is_symlink()
             ):
                 raise ArtifactValidationError("Artifact path escapes the run directory")
             if (

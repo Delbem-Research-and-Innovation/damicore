@@ -175,15 +175,19 @@ class PipelineJournal:
         logger.info("artifact_reused", extra={"run_id": self.run_id, "stage": stage})
         return True
 
+    # Every path below is resolved before it is judged, so what these three guards decide is
+    # containment and kind -- never whether the caller named a link. A resolved path is not a
+    # symlink, so a test for one here could not fire; the loader's contract states the same
+    # rule, and packages/damicore/tests/test_resume_and_inventory.py pins both halves of it.
     def _record(self, path: Path) -> dict[str, object]:
         resolved = path.resolve()
-        if not resolved.is_relative_to(self.run_dir) or resolved.is_symlink():
+        if not resolved.is_relative_to(self.run_dir):
             raise ArtifactValidationError("Receipt path escapes the run directory")
         return artifact_record(resolved, self.run_dir)
 
     def _input_record(self, path: Path) -> dict[str, object]:
         resolved = path.resolve()
-        if not resolved.is_file() or resolved.is_symlink():
+        if not resolved.is_file():
             raise ArtifactValidationError("Receipt input is not a regular file")
         if resolved.is_relative_to(self.run_dir):
             return self._record(resolved)
@@ -200,7 +204,6 @@ class PipelineJournal:
             relative.is_absolute()
             or ".." in relative.parts
             or not path.is_relative_to(self.run_dir)
-            or path.is_symlink()
         ):
             raise ArtifactValidationError("Receipt path escapes the run directory")
         return path
