@@ -2,11 +2,7 @@ cff-version: 1.2.0
 message: If you use this software, please cite it using these metadata.
 title: DAMICORE
 abstract: >-
-  DAMICORE clusters the rows or columns of a local CSV without asking for a
-  feature representation or a number of clusters. It serializes each object
-  canonically, measures every pair with exact Normalized Compression Distance,
-  builds a deterministic Neighbor Joining tree, and cuts communities out of that
-  tree with FastGreedy.
+  ...
 type: software
 license: Apache-2.0
 authors:
@@ -32,4 +28,3 @@ keywords:
   - normalized compression distance
   - neighbor joining
   - community detection
-  - csv
