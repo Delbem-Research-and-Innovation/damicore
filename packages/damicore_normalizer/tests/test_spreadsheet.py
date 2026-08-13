@@ -70,6 +70,14 @@ def test_cell_text_rule_v1_renders_each_cell_type(value: CellValue, expected: st
     assert cell_text(value) == expected
 
 
+def test_cell_text_rule_refuses_a_non_finite_number() -> None:
+    """A cell holding infinity has no decimal rendering, and `allow_nan=False` would reject it
+    at the manifest boundary anyway -- later, and with a worse message."""
+    with pytest.raises(NormalizerError, match="non-finite number") as raised:
+        cell_text(float("inf"))
+    assert raised.value.code == "dataset_format_error"
+
+
 def test_cell_text_rule_refuses_a_value_it_does_not_span(tmp_path: Path) -> None:
     """Totality is the point: a type outside the rule must fail loudly rather than become a
     plausible string nobody chose."""

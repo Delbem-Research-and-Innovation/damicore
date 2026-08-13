@@ -88,6 +88,11 @@ def split_table(
 
     try:
         for values in rows:
+            # Unreachable from either reader today, and kept deliberately: the delimited
+            # reader validates every record width before this point and the spreadsheet
+            # reader slices each row to the used range, so neither can deliver a ragged row.
+            # It is the shared core's own contract, and a third reader would meet it here
+            # rather than discovering the invariant by corrupting object bytes.
             if len(values) != len(header):
                 raise NormalizerError(
                     f"Record {row_count + 1} has {len(values)} fields but the header declares "

@@ -268,3 +268,17 @@ def test_a_corpus_is_copied_in_so_the_run_stays_self_contained(tmp_path: Path) -
     assert not adopted.is_symlink()
     (corpus / "a.txt").unlink()
     assert adopted.read_bytes() == b"alpha\n"
+
+
+def test_several_empty_directories_are_refused_as_a_corpus(tmp_path: Path) -> None:
+    """Two or more sources that yield no files at all leave no file to derive the label root
+    from. The refusal must still be the typed corpus error rather than an index error from
+    the root computation."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+
+    with pytest.raises(NormalizerError, match="found 0") as raised:
+        materialize_objects([first, second], tmp_path / "out", config=CORPUS)
+    assert raised.value.code == "corpus_validation_error"

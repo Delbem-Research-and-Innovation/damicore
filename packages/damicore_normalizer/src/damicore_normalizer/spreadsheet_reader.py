@@ -117,13 +117,12 @@ def _open(path: Path) -> Workbook:
         ) from exc
 
 
-def resolve_sheet(path: Path, source: SpreadsheetSource) -> str:
-    """Name the worksheet to read, refusing to guess when a workbook holds several."""
-    workbook = _open(path)
-    try:
-        names = list(workbook.sheetnames)
-    finally:
-        workbook.close()
+def _resolve_sheet_name(names: list[str], source: SpreadsheetSource) -> str:
+    """Name the worksheet to read, refusing to guess when a workbook holds several.
+
+    Pure: it decides from the names alone, so the caller that already has a workbook open
+    does not need a second one to ask this question.
+    """
     if not names:
         raise NormalizerError("Workbook contains no worksheet", code="dataset_format_error")
     if source.sheet is None:
@@ -142,8 +141,14 @@ def resolve_sheet(path: Path, source: SpreadsheetSource) -> str:
     return source.sheet
 
 
-def _used_range(path: Path, sheet: str) -> _UsedRange:
-    """Find the real data rectangle, ignoring cells that carry only formatting.
+def _resolve_and_bound(path: Path, source: SpreadsheetSource) -> tuple[str, _UsedRange]:
+    """Choose the worksheet and find its real data rectangle, on one open workbook.
+
+    Reading the sheet names and scanning for the bounds are two questions about the same
+    file, so they are asked of the same handle. The data pass below needs its own open --
+    a read-only worksheet is a forward iterator -- so a scan costs two opens, not three.
+
+    The rectangle ignores cells that carry only formatting.
 
     openpyxl reports a sheet's dimensions from anything it stores, so a single filled cell
     far below the data inflates them; a 2x3 sheet with formatting at H40 is reported as
@@ -157,6 +162,7 @@ def _used_range(path: Path, sheet: str) -> _UsedRange:
     maximum_column = 0
     workbook = _open(path)
     try:
+        sheet = _resolve_sheet_name(list(workbook.sheetnames), source)
         worksheet = workbook[sheet]
         for number, row in enumerate(worksheet.iter_rows(values_only=True), start=1):
             filled = [index for index, value in enumerate(row, start=1) if value is not None]
@@ -173,7 +179,7 @@ def _used_range(path: Path, sheet: str) -> _UsedRange:
         workbook.close()
     if minimum_row == 0:
         raise NormalizerError("Worksheet contains no data", code="dataset_format_error")
-    return _UsedRange(minimum_row, maximum_row, minimum_column, maximum_column)
+    return sheet, _UsedRange(minimum_row, maximum_row, minimum_column, maximum_column)
 
 
 def _iter_used_rows(path: Path, sheet: str, bounds: _UsedRange) -> Iterator[tuple[str, ...]]:
@@ -205,8 +211,7 @@ def scan_spreadsheet(
     Returns the scan together with the resolved worksheet name, which the manifest records
     so a completed run never leaves which sheet was analyzed to be inferred.
     """
-    sheet = resolve_sheet(path, source)
-    bounds = _used_range(path, sheet)
+    sheet, bounds = _resolve_and_bound(path, source)
     rows = _iter_used_rows(path, sheet, bounds)
     try:
         header = next(rows)
