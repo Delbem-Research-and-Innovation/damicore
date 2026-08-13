@@ -26,11 +26,18 @@ CellValue = str | int | float | bool | dt.datetime | dt.date | dt.time | dt.time
 # container (BadZipFile, which derives straight from Exception rather than OSError), an
 # encrypted one, or a member the reader cannot parse. They are caught as a set so a malformed
 # workbook is one typed failure rather than whichever library exception happened to surface.
+#
+# SyntaxError is here for the XML itself: a container that opens and holds a malformed
+# worksheet reaches the parser, and both backends openpyxl may be using report that as a
+# SyntaxError subclass -- ElementTree's ParseError and lxml's XMLSyntaxError. Naming the
+# parent rather than either class keeps this independent of which one is installed, the same
+# way cell_text keeps object bytes independent of the reader.
 _WORKBOOK_FAILURES = (
     OSError,
     ValueError,
     KeyError,
     TypeError,
+    SyntaxError,
     zipfile.BadZipFile,
     InvalidFileException,
 )

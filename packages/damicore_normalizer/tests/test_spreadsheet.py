@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import tracemalloc
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -231,6 +232,46 @@ def test_a_worksheet_with_no_data_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "blank.xlsx"
     Workbook().save(path)
     with pytest.raises(NormalizerError, match="contains no data") as raised:
+        materialize_objects(path, tmp_path / "out", config=SHEET)
+    assert raised.value.code == "dataset_format_error"
+
+
+def test_a_worksheet_with_too_few_rows_keeps_the_shared_refusal(tmp_path: Path) -> None:
+    """The split rules belong to the shared core, and a workbook reaches them like any table.
+
+    The reader wraps that call to translate library failures, so the wrapper has to let a
+    refusal it did not cause through unchanged -- otherwise "not enough data rows" would reach
+    the caller as "Workbook parsing failed", naming the file instead of the shape.
+    """
+    path = _workbook(tmp_path / "one_row.xlsx", [["a", "b"], ["1", "2"]])
+    with pytest.raises(NormalizerError, match="enough data rows") as raised:
+        materialize_objects(
+            path,
+            tmp_path / "out",
+            config=NormalizationConfig(source=SpreadsheetSource(split="rows")),
+        )
+    assert raised.value.code == "dataset_format_error"
+
+
+def test_a_workbook_whose_worksheet_xml_is_malformed_is_translated(tmp_path: Path) -> None:
+    """A valid zip container holding a worksheet the XML parser cannot read.
+
+    Distinct from the not-a-zip rows above, and the case that reaches the parser rather than
+    the container: the failure arrives as a `SyntaxError` subclass -- `ParseError` under
+    ElementTree, `XMLSyntaxError` under lxml -- which is neither an `OSError` nor a
+    `ValueError`, so it escaped this package as a raw library exception until it was named.
+    """
+    path = _workbook(tmp_path / "corrupt.xlsx", [["a", "b"], ["1", "2"], ["3", "4"]])
+    intact = zipfile.ZipFile(path)
+    members = {name: intact.read(name) for name in intact.namelist()}
+    intact.close()
+    sheet_member = next(name for name in members if name.startswith("xl/worksheets/"))
+    members[sheet_member] = b"<worksheet><this is not well formed"
+    with zipfile.ZipFile(path, "w") as broken:
+        for name, payload in members.items():
+            broken.writestr(name, payload)
+
+    with pytest.raises(NormalizerError, match="Could not open workbook") as raised:
         materialize_objects(path, tmp_path / "out", config=SHEET)
     assert raised.value.code == "dataset_format_error"
 
