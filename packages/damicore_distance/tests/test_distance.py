@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 from collections.abc import Callable, Iterator
@@ -34,6 +35,73 @@ def _normalized(tmp_path: Path) -> NormalizationResult:
         tmp_path / "normalized",
         config=NormalizationConfig(chunk_rows=1),
     )
+
+
+# The manifest input block is this stage's whole contract with the previous one, and it is a
+# union of three variants. This stage measures bytes and never looks past `kind`, which is
+# exactly why a variant it cannot parse is a run it refuses outright rather than a wrong
+# answer -- and why one row per variant belongs in this package's own suite instead of only
+# in the aggregate's end-to-end runs.
+@pytest.mark.parametrize(
+    ("kind", "encoding", "block"),
+    [
+        pytest.param(
+            "delimited",
+            "json-lines/1",
+            {"delimiter": ",", "encoding": "utf-8", "split": "columns"},
+            id="delimited-dataset",
+        ),
+        pytest.param(
+            "xlsx",
+            "json-lines/1",
+            {"sheet": "Sheet1", "split": "rows", "cell_text_rule": "v1"},
+            id="spreadsheet-dataset",
+        ),
+        pytest.param("files", "raw-bytes/1", {}, id="file-corpus"),
+    ],
+)
+def test_every_manifest_input_variant_is_accepted(
+    tmp_path: Path, kind: str, encoding: str, block: dict[str, object]
+) -> None:
+    payloads = [b"alpha alpha alpha\n" * 3, b"beta beta beta\n" * 4]
+    objects_dir = tmp_path / "normalized" / "objects"
+    objects_dir.mkdir(parents=True)
+    objects: list[dict[str, object]] = []
+    for index, payload in enumerate(payloads, start=1):
+        name = f"object_{index:06d}"
+        (objects_dir / name).write_bytes(payload)
+        objects.append(
+            {
+                "object_id": name,
+                "label": f"label_{index}",
+                "relative_path": f"objects/{name}",
+                "size_bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    identity = {"kind": kind, "sha256": "a" * 64, "size_bytes": sum(map(len, payloads))}
+    located: dict[str, object] = (
+        {"root": str(tmp_path), "file_count": 2, "recursive": True, "include_hidden": False}
+        if kind == "files"
+        else {"path": str(tmp_path / "source")}
+    )
+    manifest_path = tmp_path / "normalized" / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "object_encoding": encoding,
+                "input": {**identity, **located, **block},
+                "objects": objects,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = compute_distance_matrix(
+        manifest_path, tmp_path / kind, config=DistanceConfig(workers=1)
+    )
+    assert result.object_count == 2
 
 
 def test_ncd_is_not_clamped_and_zero_denominator_fails() -> None:
