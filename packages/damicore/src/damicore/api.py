@@ -1091,7 +1091,9 @@ def load_result(output_dir: str | Path) -> DamicoreResult:
     try:
         manifest = RunManifest.model_validate_json(paths.manifest.read_text(encoding="utf-8"))
         if manifest.status != "completed" or manifest.schema_version != SCHEMA_VERSION:
-            raise ArtifactValidationError("Only completed schema-v2 runs can be loaded")
+            raise ArtifactValidationError(
+                f"Only completed schema-v{SCHEMA_VERSION} runs can be loaded"
+            )
         for record in manifest.artifacts.values():
             relative = Path(record.path)
             candidate = (run_dir / relative).resolve()

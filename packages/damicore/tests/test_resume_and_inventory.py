@@ -437,6 +437,25 @@ def test_an_artifact_reached_through_a_symlinked_directory_is_rejected(tmp_path:
         load_result(output)
 
 
+def test_the_loader_names_the_schema_version_it_requires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal has to name the version the loader is actually holding out for.
+
+    A message that spells the number out agrees with the constant only until one of them
+    changes, and the one a reader checks by eye is the message. Moving the constant is also
+    the only way to reach this branch through its version half at all, since the manifest
+    model pins the same number and would reject a foreign one before this line runs.
+    """
+    output = tmp_path / "run"
+    result = run(_csv(tmp_path), output_dir=output, progress=False, execution=_single_worker())
+    result.close()
+
+    monkeypatch.setattr(api, "SCHEMA_VERSION", 3)
+    with pytest.raises(ArtifactValidationError, match="schema-v3"):
+        load_result(output)
+
+
 def test_an_artifact_symlinked_within_the_run_directory_is_read(tmp_path: Path) -> None:
     """What the loader enforces is containment, not file kind.
 
