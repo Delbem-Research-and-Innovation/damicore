@@ -16,15 +16,11 @@ SERIAL = ExecutionConfig(workers=1)
 
 
 def _dataset(directory: Path) -> Path:
-    return generate_csv(
-        directory / "dataset.csv", rows=24, columns=8, clusters=2, seed=42
-    )
+    return generate_csv(directory / "dataset.csv", rows=24, columns=8, clusters=2, seed=42)
 
 
 @pytest.mark.parametrize("split", ["columns", "rows"])
-def test_pipeline_produces_complete_result_for_split(
-    tmp_path: Path, split: str
-) -> None:
+def test_pipeline_produces_complete_result_for_split(tmp_path: Path, split: str) -> None:
     source = _dataset(tmp_path)
     result = run(
         source,
@@ -52,9 +48,7 @@ def test_pipeline_produces_complete_result_for_split(
         def group_of(object_id: str) -> int:
             return (int(object_id.split("_")[1]) - 1) % 2
 
-        recovered = {
-            frozenset(map(group_of, members)) for members in result.clusters.values()
-        }
+        recovered = {frozenset(map(group_of, members)) for members in result.clusters.values()}
         assert recovered == {frozenset({0}), frozenset({1})}
     finally:
         result.close()

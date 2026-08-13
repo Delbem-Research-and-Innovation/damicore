@@ -1,10 +1,11 @@
+import hashlib
 import json
 import sys
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import pytest
@@ -22,7 +23,9 @@ from damicore_distance.ncd import normalized_compression_distance
 pytestmark = pytest.mark.unit
 
 # Mirrors damicore_distance.api._worker, which this suite wraps to inject a shard failure.
-WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], str, int, int]
+WorkerArguments = tuple[
+    int, list[tuple[int, int]], list[str], list[int], Literal["zlib", "gzip"], int, int
+]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
 
 
@@ -34,6 +37,73 @@ def _normalized(tmp_path: Path) -> NormalizationResult:
         tmp_path / "normalized",
         config=NormalizationConfig(chunk_rows=1),
     )
+
+
+# The manifest input block is this stage's whole contract with the previous one, and it is a
+# union of three variants. This stage measures bytes and never looks past `kind`, which is
+# exactly why a variant it cannot parse is a run it refuses outright rather than a wrong
+# answer -- and why one row per variant belongs in this package's own suite instead of only
+# in the aggregate's end-to-end runs.
+@pytest.mark.parametrize(
+    ("kind", "encoding", "block"),
+    [
+        pytest.param(
+            "delimited",
+            "json-lines/1",
+            {"delimiter": ",", "encoding": "utf-8", "split": "columns"},
+            id="delimited-dataset",
+        ),
+        pytest.param(
+            "xlsx",
+            "json-lines/1",
+            {"sheet": "Sheet1", "split": "rows", "cell_text_rule": "v1"},
+            id="spreadsheet-dataset",
+        ),
+        pytest.param("files", "raw-bytes/1", {}, id="file-corpus"),
+    ],
+)
+def test_every_manifest_input_variant_is_accepted(
+    tmp_path: Path, kind: str, encoding: str, block: dict[str, object]
+) -> None:
+    payloads = [b"alpha alpha alpha\n" * 3, b"beta beta beta\n" * 4]
+    objects_dir = tmp_path / "normalized" / "objects"
+    objects_dir.mkdir(parents=True)
+    objects: list[dict[str, object]] = []
+    for index, payload in enumerate(payloads, start=1):
+        name = f"object_{index:06d}"
+        (objects_dir / name).write_bytes(payload)
+        objects.append(
+            {
+                "object_id": name,
+                "label": f"label_{index}",
+                "relative_path": f"objects/{name}",
+                "size_bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    identity = {"kind": kind, "sha256": "a" * 64, "size_bytes": sum(map(len, payloads))}
+    located: dict[str, object] = (
+        {"root": str(tmp_path), "file_count": 2, "recursive": True, "include_hidden": False}
+        if kind == "files"
+        else {"path": str(tmp_path / "source")}
+    )
+    manifest_path = tmp_path / "normalized" / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "object_encoding": encoding,
+                "input": {**identity, **located, **block},
+                "objects": objects,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = compute_distance_matrix(
+        manifest_path, tmp_path / kind, config=DistanceConfig(workers=1)
+    )
+    assert result.object_count == 2
 
 
 def test_ncd_is_not_clamped_and_zero_denominator_fails() -> None:
@@ -517,6 +587,27 @@ def test_a_non_positive_compressed_size_is_rejected(size: int) -> None:
 
     with pytest.raises(PydanticValidationError, match="greater than 0"):
         CompressedSizesCheckpoint(identity={}, sizes=(size, 5))
+
+
+def test_the_memory_map_close_releases_the_handle_numpy_actually_exposes(tmp_path: Path) -> None:
+    """`close()` reaches a private numpy attribute, so the assumption is pinned here.
+
+    Releasing the map deterministically is what the view promises, and the only handle numpy
+    offers is `memmap._mmap`. The call site tolerates its absence so that `close()` never
+    raises from a caller's `finally` -- but tolerating it silently would turn a renamed
+    attribute into a leaked map behind a view that still reports itself closed. This test is
+    what makes that a failure at the supported numpy range's edge instead.
+    """
+    path = tmp_path / "distance.npy"
+    np.save(path, np.zeros((2, 2), dtype=np.float64), allow_pickle=False)  # pyright: ignore[reportUnknownMemberType]
+    view = DistanceMatrixView(path, ["a", "b"])
+    try:
+        handle = getattr(view._matrix, "_mmap", None)
+        assert handle is not None, "numpy.memmap no longer exposes _mmap; close() cannot release"
+        assert not handle.closed
+    finally:
+        view.close()
+    assert handle.closed
 
 
 def test_the_matrix_view_close_is_idempotent(tmp_path: Path) -> None:

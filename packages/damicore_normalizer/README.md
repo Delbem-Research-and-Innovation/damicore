@@ -1,10 +1,12 @@
 # damicore-normalizer
 
-damicore-normalizer deterministically serializes the columns or rows of a local
-CSV as canonical JSONL objects, recording the size and SHA-256 of every object.
-It is the first stage of the DAMICORE pipeline; most users install the aggregate
+damicore-normalizer turns an input source into canonical objects, recording the
+size and SHA-256 of every one. Objects come from one of two sources: a dataset
+split by column or by row -- delimited text (`.csv`, `.tsv`, `.txt`) or an
+`.xlsx`/`.xlsm` worksheet -- or a set of files that already are the objects. It
+is the first stage of the DAMICORE pipeline; most users install the aggregate
 `damicore` distribution, which runs all four stages end to end. Install this
-package alone to normalize datasets without the rest of the pipeline.
+package alone to materialize objects without the rest of the pipeline.
 
 ```bash
 pip install damicore-normalizer
@@ -13,19 +15,47 @@ pip install damicore-normalizer
 ## Python
 
 ```python
-from damicore_normalizer import NormalizationConfig, normalize_csv
+from damicore_normalizer import (
+    DelimitedSource,
+    FileCorpusSource,
+    NormalizationConfig,
+    SpreadsheetSource,
+    materialize_objects,
+)
 
-result = normalize_csv(
+# Split a delimited file. Any single character is a delimiter, so a tab-separated
+# `.txt` is this same source with `delimiter="\t"`.
+result = materialize_objects(
     "dataset.csv",
     "normalization",
-    config=NormalizationConfig(split="columns", chunk_rows=50_000),
+    config=NormalizationConfig(source=DelimitedSource(split="columns"), chunk_rows=50_000),
+)
+
+# Split a worksheet. `sheet` is required when the workbook holds more than one.
+spreadsheet = materialize_objects(
+    "dataset.xlsx",
+    "normalization-xlsx",
+    config=NormalizationConfig(source=SpreadsheetSource(split="columns")),
+)
+
+# Adopt files that already are the objects. No split, delimiter, or encoding.
+corpus = materialize_objects(
+    "corpus",
+    "normalization-files",
+    config=NormalizationConfig(source=FileCorpusSource(recursive=True)),
 )
 ```
 
-The call streams through `pandas.read_csv`, bounds open column files with an
-LRU pool, and writes the objects plus a `manifest.json` into the output
-directory. That normalization manifest is the input the sibling
-`damicore-distance` distribution consumes to compute the NCD matrix.
+A delimited source streams through `pandas.read_csv` and a worksheet streams
+through `openpyxl` in read-only mode; both bound open column files with an LRU
+pool. A file corpus is copied in and hashed, so the run directory stays
+self-contained. Every source writes the objects plus a `manifest.json` into the
+output directory, and that manifest is the input the sibling `damicore-distance`
+distribution consumes to compute the NCD matrix.
+
+The manifest records `object_encoding` -- `json-lines/1` for a split dataset,
+`raw-bytes/1` for adopted files -- because an NCD value is only meaningful
+relative to the bytes it measured.
 
 ## Links
 

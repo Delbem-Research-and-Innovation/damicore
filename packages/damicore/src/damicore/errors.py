@@ -12,10 +12,10 @@ class DamicoreError(Exception):
     """Base class of every public DAMICORE failure, and the only one worth catching broadly.
 
     ``code`` is the stable machine-readable identifier for the failure: the class name in
-    snake_case, with ``input_drift`` as the single 0.1 exception. It is what the CLI's JSON
+    snake_case, with ``input_drift`` as the single 0.2 exception. It is what the CLI's JSON
     error envelope reports, and it never carries a stage's internal vocabulary. ``context``
-    holds bounded diagnostic values supplied at the raise site; it never contains CSV cell
-    contents or whole input rows.
+    holds bounded diagnostic values supplied at the raise site; it never contains dataset cell
+    contents, whole input rows, or the contents of an adopted file.
     """
 
     def __init__(self, message: str, *, code: str | None = None, **context: object) -> None:
@@ -29,21 +29,25 @@ class ConfigurationError(DamicoreError):
 
 
 class InputValidationError(DamicoreError):
-    """The input CSV is unusable: unreadable, or changed on disk mid-run (``input_drift``)."""
+    """The input is unusable: a missing, wrong-kind, or unreadable path, a corpus that breaks
+    the corpus rules, or an input that changed on disk mid-run (``input_drift``)."""
 
 
-class CSVFormatError(InputValidationError):
-    """The CSV violates the CSV contract: bad, empty, or duplicated header names, a row whose
-    field count disagrees with the header, or too few columns or data rows to cluster."""
+class DatasetFormatError(InputValidationError):
+    """A dataset violates the input contract: bad, empty, or duplicated header names, a record
+    whose field count disagrees with the header, too few columns or data rows to cluster, a
+    workbook that cannot be opened or names no single worksheet, or a cell holding a value the
+    cell-text rule does not span."""
 
 
 class ResourceLimitError(DamicoreError):
     """Preflight projected a run outside the configured ``ResourceLimits``.
 
     ``context["estimate"]`` holds the ``ResourceEstimate``, whose ``violations`` names every
-    gate that failed. Reshape the split or reduce the input; individual limits may be raised
-    through ``ExecutionConfig.limits`` after reviewing ``estimate()``, but the free-disk gate
-    is always enforced.
+    gate that failed. Reshape the source -- a different split for a dataset, fewer files for a
+    corpus -- or reduce the input; individual limits may be raised through
+    ``ExecutionConfig.limits`` after reviewing ``estimate()``, but the free-disk gate is
+    always enforced.
     """
 
 

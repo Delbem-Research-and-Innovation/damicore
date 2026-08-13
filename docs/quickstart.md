@@ -9,7 +9,7 @@ count opens a process pool whose workers re-import the calling module.
 %pip install damicore
 ```
 
-Upload a CSV (or mount storage) and set its local path:
+Upload a dataset (or mount storage) and set its local path:
 
 ```python
 csv_path = "/content/dataset.csv"
@@ -33,6 +33,13 @@ Optionally copy only verified, completed artifacts to a final empty directory:
 ```python
 result.save("/content/drive/MyDrive/damicore-result")
 result.close()
+```
+
+A worksheet or a directory of files is the same call with a different source:
+
+```python
+run("/content/dataset.xlsx", source_kind="xlsx", output_dir="/content/xlsx-run")
+run("/content/corpus", source_kind="files", output_dir="/content/corpus-run")
 ```
 
 On Colab, keep active processing under `/content`; mounted Drive is better used

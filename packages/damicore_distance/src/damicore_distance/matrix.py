@@ -103,6 +103,11 @@ class DistanceMatrixView:
         return pd.DataFrame(np.asarray(matrix), index=self.labels, columns=self.labels)
 
     def close(self) -> None:
+        # `_mmap` is the only handle numpy exposes for releasing a memory map deterministically,
+        # and it is private. Its absence is tolerated so close() never raises out of a caller's
+        # finally block -- but that tolerance would otherwise be silent, leaving a leaked map
+        # behind a view that reports itself closed, so a test pins the attribute's existence
+        # rather than leaving this branch to speak for it.
         if self._matrix is not None:
             mmap = getattr(self._matrix, "_mmap", None)
             if mmap is not None:

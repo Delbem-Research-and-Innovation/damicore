@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import codecs
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class NormalizationConfig(BaseModel):
-    """Configuration for deterministic CSV normalization."""
+class DelimitedSource(BaseModel):
+    """Split one delimited-text file. Any single character is a delimiter, so `.csv`,
+    `.tsv`, and `.txt` are the same source with different separators."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    kind: Literal["delimited"] = "delimited"
     split: Literal["columns", "rows"] = "columns"
     delimiter: str = ","
     encoding: str = "utf-8"
-    chunk_rows: int = Field(default=50_000, gt=0)
-    max_open_files: int = Field(default=64, gt=0)
 
     @field_validator("delimiter")
     @classmethod
@@ -29,3 +29,44 @@ class NormalizationConfig(BaseModel):
     def _validate_encoding(cls, value: str) -> str:
         codecs.lookup(value)
         return value
+
+
+class SpreadsheetSource(BaseModel):
+    """Split one worksheet of an `.xlsx`/`.xlsm` workbook.
+
+    ``sheet`` is ``None`` only when the workbook holds exactly one worksheet. A workbook
+    with several requires the name, because defaulting to the first would silently decide
+    which data was analyzed. There is no delimiter or encoding: a workbook declares neither.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["xlsx"] = "xlsx"
+    split: Literal["columns", "rows"] = "columns"
+    sheet: str | None = None
+
+
+class FileCorpusSource(BaseModel):
+    """Adopt files that are already the objects. No split, no delimiter, no encoding."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["files"] = "files"
+    recursive: bool = True
+    include_hidden: bool = False
+
+
+ObjectSource = Annotated[
+    DelimitedSource | SpreadsheetSource | FileCorpusSource,
+    Field(discriminator="kind"),
+]
+
+
+class NormalizationConfig(BaseModel):
+    """What the objects are (``source``) and how the run is executed (everything else)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source: ObjectSource = DelimitedSource()
+    chunk_rows: int = Field(default=50_000, gt=0)
+    max_open_files: int = Field(default=64, gt=0)

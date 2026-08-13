@@ -55,9 +55,7 @@ def wheel_metadata(path: Path) -> Message:
             if name.endswith(".dist-info/METADATA") and name.count("/") == 1
         ]
         if len(names) != 1:
-            raise ValueError(
-                f"{path.name}: expected one .dist-info/METADATA, got {names}"
-            )
+            raise ValueError(f"{path.name}: expected one .dist-info/METADATA, got {names}")
         return message_from_bytes(archive.read(names[0]))
 
 
@@ -70,9 +68,7 @@ def sdist_metadata(path: Path) -> Message:
             if name.endswith("/PKG-INFO") and name.count("/") == 1
         ]
         if len(names) != 1:
-            raise ValueError(
-                f"{path.name}: expected one top-level PKG-INFO, got {names}"
-            )
+            raise ValueError(f"{path.name}: expected one top-level PKG-INFO, got {names}")
         member = archive.extractfile(names[0])
         if member is None:
             raise ValueError(f"{path.name}: PKG-INFO is not a regular file")
@@ -100,9 +96,7 @@ def check_directory_contents(dist: Path, expected: set[str]) -> Iterator[str]:
         found: dict[str, list[str]] = {}
         for path in files:
             if path.name.endswith(suffix):
-                found.setdefault(normalize(path.name.split("-")[0]), []).append(
-                    path.name
-                )
+                found.setdefault(normalize(path.name.split("-")[0]), []).append(path.name)
         for package in sorted(expected - found.keys()):
             yield f"missing {kind} for {package}"
         for package in sorted(found.keys() - expected):
@@ -130,11 +124,7 @@ def check_distribution(path: Path, metadata: Message) -> Iterator[str]:
         yield f"{path.name}: metadata declares no Name or Version"
         return
 
-    stem = (
-        path.name[: -len(".whl")]
-        if path.name.endswith(".whl")
-        else path.name[: -len(".tar.gz")]
-    )
+    stem = path.name[: -len(".whl")] if path.name.endswith(".whl") else path.name[: -len(".tar.gz")]
     filename_name, _, remainder = stem.partition("-")
     filename_version = remainder.split("-")[0]
     if normalize(filename_name) != normalize(name):
@@ -148,9 +138,7 @@ def check_distribution(path: Path, metadata: Message) -> Iterator[str]:
             yield f"{path.name}: Requires-Dist {requirement!r} contains {marker!r}"
 
 
-def check_wheel_advertises_only_what_it_ships(
-    path: Path, metadata: Message
-) -> Iterator[str]:
+def check_wheel_advertises_only_what_it_ships(path: Path, metadata: Message) -> Iterator[str]:
     """Yield a failure when a wheel's metadata claims something its members do not deliver.
 
     ``Typing :: Typed`` and ``License-Expression`` are claims PyPI renders and type checkers
@@ -174,24 +162,19 @@ def check_wheel_advertises_only_what_it_ships(
     if not metadata.get("License-Expression"):
         yield f"{path.name}: metadata carries no License-Expression"
     if not any(
-        name.startswith(f"{path.name.split('-')[0]}") and "/licenses/" in name
-        for name in members
+        name.startswith(f"{path.name.split('-')[0]}") and "/licenses/" in name for name in members
     ):
         yield f"{path.name}: ships no licence file in .dist-info/licenses/"
 
 
-def check_lockstep_version(
-    versions: dict[str, str], expected: str | None
-) -> Iterator[str]:
+def check_lockstep_version(versions: dict[str, str], expected: str | None) -> Iterator[str]:
     """Yield a failure when the distributions disagree on a version or miss the tag."""
     distinct = sorted(set(versions.values()))
     if len(distinct) > 1:
         yield f"distributions are not in lockstep: {versions}"
     if expected is not None:
         mismatched = {
-            artifact: version
-            for artifact, version in versions.items()
-            if version != expected
+            artifact: version for artifact, version in versions.items() if version != expected
         }
         if mismatched:
             yield f"expected version {expected!r}, got {mismatched}"
@@ -206,9 +189,7 @@ def check_rebuild_is_identical(dist: Path, rebuilt: Path) -> Iterator[str]:
             continue
         before, after = wheel_members(original), wheel_members(candidate)
         differing = sorted(
-            name
-            for name in before.keys() | after.keys()
-            if before.get(name) != after.get(name)
+            name for name in before.keys() | after.keys() if before.get(name) != after.get(name)
         )
         if differing:
             yield f"{original.name}: rebuild changed {differing}"
@@ -267,8 +248,7 @@ def main() -> int:
 
     declared = ", ".join(sorted(set(versions.values()))) or "none"
     print(
-        f"verify-dist: {len(expected)} packages, {len(versions)} distributions, "
-        f"version {declared}"
+        f"verify-dist: {len(expected)} packages, {len(versions)} distributions, version {declared}"
     )
     return 0
 

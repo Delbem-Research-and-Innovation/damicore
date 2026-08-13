@@ -23,8 +23,23 @@ damicore-distance = { workspace = true }
 damicore-tree-builder = { workspace = true }
 damicore-clusterizer = { workspace = true }
 
+# Ruff resolves its configuration per file, walking up to the nearest pyproject that declares
+# this section, so a package's copy governs that package and nothing above it. This one is what
+# `tests`, `benchmarks` and `.github/scripts` are linted by; without it they fall back to Ruff's
+# defaults and `make check` checks them against rules this repository never chose. Held equal to
+# the package sections by tests/architecture/test_boundaries.py.
+[tool.ruff]
+line-length = 100
+exclude = [".venv", "dist", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "RUF100", "UP"]
+
 [tool.pytest.ini_options]
 testpaths = ["packages", "tests"]
+# Using a marker outside the registry below is a collection error, not a warning:
+# the registry is a contract only if a name outside it fails.
+addopts = "--strict-markers"
 markers = [
     "unit: fast isolated unit tests",
     "contract: cross-package contract tests",

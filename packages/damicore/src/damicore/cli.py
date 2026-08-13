@@ -27,8 +27,9 @@ _DEFAULT_LIMITS = ResourceLimits()
 
 
 _DESCRIPTION = (
-    "Cluster the rows or columns of a local CSV by canonical serialization, exact Normalized "
-    "Compression Distance, deterministic Neighbor Joining, and FastGreedy communities."
+    "Cluster local files, or the rows or columns of a local dataset, by canonical "
+    "serialization, exact Normalized Compression Distance, deterministic Neighbor Joining, "
+    "and FastGreedy communities."
 )
 _ESTIMATE_DESCRIPTION = (
     "Report the exact cost of a run -- objects, pairs, matrix bytes, working memory, free "
@@ -49,18 +50,57 @@ def _parser() -> argparse.ArgumentParser:
         ("run", _RUN_DESCRIPTION),
     ):
         command = commands.add_parser(name, description=description, help=description)
-        command.add_argument("csv", help="path to the CSV file to read")
+        command.add_argument(
+            "source",
+            nargs="+",
+            help=(
+                "dataset file to split, or the files and directories to cluster directly "
+                "when --source is files"
+            ),
+        )
+        command.add_argument(
+            "--source",
+            dest="source_kind",
+            choices=("delimited", "xlsx", "files"),
+            default="delimited",
+            help=(
+                "where objects come from: split a delimited text file, split a worksheet, or "
+                "adopt files that already are the objects (default: delimited)"
+            ),
+        )
         command.add_argument(
             "--split",
             choices=("columns", "rows"),
-            default="columns",
-            help="whether each column or each row becomes one object (default: columns)",
+            help=(
+                "whether each column or each row becomes one object (default: columns); "
+                "does not apply to --source files"
+            ),
         )
         command.add_argument(
-            "--delimiter", default=",", help="CSV field delimiter (default: comma)"
+            "--delimiter",
+            help="field delimiter of a delimited source (default: comma)",
         )
         command.add_argument(
-            "--encoding", default="utf-8", help="text encoding of the CSV (default: utf-8)"
+            "--encoding",
+            help="text encoding of a delimited source (default: utf-8)",
+        )
+        command.add_argument(
+            "--sheet",
+            help="worksheet to read from an xlsx source; required when it holds more than one",
+        )
+        command.add_argument(
+            "--no-recursive",
+            dest="recursive",
+            action="store_const",
+            const=False,
+            help="do not descend into subdirectories of a files source",
+        )
+        command.add_argument(
+            "--include-hidden",
+            dest="include_hidden",
+            action="store_const",
+            const=True,
+            help="include dot-prefixed files and directories in a files source",
         )
         command.add_argument(
             "--workers",
@@ -180,10 +220,14 @@ def main(argv: list[str] | None = None) -> int:
     # argparse yields Any, and a dict of options splatted with ** erases every signature
     # check at the call. Bind the parsed values to typed locals once, so each argument below
     # is verified against the public API it is passed to.
-    csv_path: str = arguments.csv
-    split: str = arguments.split
-    delimiter: str = arguments.delimiter
-    encoding: str = arguments.encoding
+    source: list[str] = arguments.source
+    source_kind: str = arguments.source_kind
+    split: str | None = arguments.split
+    delimiter: str | None = arguments.delimiter
+    encoding: str | None = arguments.encoding
+    sheet: str | None = arguments.sheet
+    recursive: bool | None = arguments.recursive
+    include_hidden: bool | None = arguments.include_hidden
     keep_normalized: bool = arguments.keep_normalized
     save_diagnostics: bool = arguments.save_diagnostics
     result: DamicoreResult | None = None
@@ -197,10 +241,14 @@ def main(argv: list[str] | None = None) -> int:
             raise ConfigurationError(str(exc)) from exc
         if arguments.command == "estimate":
             preview = estimate(
-                csv_path,
+                source,
+                source_kind=source_kind,
                 split=split,
                 delimiter=delimiter,
                 encoding=encoding,
+                sheet=sheet,
+                recursive=recursive,
+                include_hidden=include_hidden,
                 keep_normalized=keep_normalized,
                 save_diagnostics=save_diagnostics,
                 execution=execution,
@@ -220,10 +268,14 @@ def main(argv: list[str] | None = None) -> int:
             num_clusters: int | None = arguments.clusters
             output_dir: str | None = arguments.output_dir
             result = run(
-                csv_path,
+                source,
+                source_kind=source_kind,
                 split=split,
                 delimiter=delimiter,
                 encoding=encoding,
+                sheet=sheet,
+                recursive=recursive,
+                include_hidden=include_hidden,
                 keep_normalized=keep_normalized,
                 save_diagnostics=save_diagnostics,
                 execution=execution,

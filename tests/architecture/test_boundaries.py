@@ -34,6 +34,11 @@ def _project(package: str) -> dict[str, object]:
         return tomllib.load(stream)["project"]
 
 
+def _tool(path: Path) -> dict[str, object]:
+    with path.open("rb") as stream:
+        return tomllib.load(stream)["tool"]
+
+
 def _version(package: str) -> str:
     return str(_project(package)["version"])
 
@@ -72,9 +77,7 @@ def _imports(path: Path) -> set[str]:
 def test_stage_packages_do_not_import_each_other_or_orchestrator() -> None:
     for stage in STAGES:
         source = ROOT / "packages" / stage / "src" / stage
-        modules = [
-            path for path in source.rglob("*.py") if "__pycache__" not in path.parts
-        ]
+        modules = [path for path in source.rglob("*.py") if "__pycache__" not in path.parts]
         assert modules, stage
         for module in modules:
             forbidden = (STAGES - {stage}) | {"damicore", "synthetic_data"}
@@ -91,9 +94,14 @@ def test_orchestrator_has_no_runtime_dependency_on_synthetic_data() -> None:
 
 def test_public_exports_are_exact() -> None:
     assert damicore_normalizer.__all__ == [
+        "materialize_objects",
         "normalize_csv",
         "NormalizationConfig",
+        "DelimitedSource",
+        "SpreadsheetSource",
+        "FileCorpusSource",
         "NormalizationResult",
+        "NormalizationManifest",
         "ObjectDescriptor",
         "NormalizerError",
     ]
@@ -134,7 +142,7 @@ def test_public_exports_are_exact() -> None:
         "DamicoreError",
         "ConfigurationError",
         "InputValidationError",
-        "CSVFormatError",
+        "DatasetFormatError",
         "ResourceLimitError",
         "OutputDirectoryConflictError",
         "CheckpointMismatchError",
@@ -148,6 +156,52 @@ def test_public_exports_are_exact() -> None:
         "ArtifactValidationError",
         "MaterializationError",
     }
+
+
+# Every symbol the aggregate reaches for inside a stage package, rather than through that
+# package's public surface. The set is closed, and this is the only thing that closes it: the
+# distributions install independently and are pinned by range, so a stage may release a patch
+# that moves one of these while `test_public_exports_are_exact` above stays green and every
+# in-repo run keeps passing -- the workspace only ever resolves them together. Nothing here is
+# a promise to users; it is a list of couplings that must not move quietly.
+INTERNAL_STAGE_COUPLING = {
+    # Preflight and the run share one traversal, so the projection is exact rather than
+    # sampled. There is no public entry point for "measure without writing".
+    "damicore_normalizer.api:scan_source",
+    # The discriminated union of the source axis, carried as a config value.
+    "damicore_normalizer.config:ObjectSource",
+    # The progress protocol the distance stage calls back on.
+    "damicore_distance.api:ProgressCallback",
+}
+
+
+def _deep_stage_imports(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    reached: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        head, _, tail = node.module.partition(".")
+        if head in STAGES and tail:
+            reached.update(f"{node.module}:{alias.name}" for alias in node.names)
+    return reached
+
+
+def test_the_aggregate_reaches_into_stage_internals_only_where_declared() -> None:
+    """A public symbol is reached through its package; anything else is listed above.
+
+    Two failures this catches, and they need different fixes. A symbol appearing here that is
+    already exported means the import took the long way round and should go through the
+    package. A genuinely new one means the aggregate grew a dependency on another
+    distribution's internals, which is a decision -- publish it, or accept it here.
+    """
+    source = ROOT / "packages/damicore/src/damicore"
+    modules = [path for path in source.rglob("*.py") if "__pycache__" not in path.parts]
+    assert modules
+    reached: set[str] = set()
+    for module in modules:
+        reached |= _deep_stage_imports(module)
+    assert reached == INTERNAL_STAGE_COUPLING, sorted(reached ^ INTERNAL_STAGE_COUPLING)
 
 
 def test_public_result_models_declare_the_specified_fields() -> None:
@@ -195,9 +249,7 @@ def test_public_result_models_declare_the_specified_fields() -> None:
 
 def test_public_pyprojects_contain_no_workspace_paths_or_typer() -> None:
     for package in sorted(PUBLIC):
-        text = (ROOT / "packages" / package / "pyproject.toml").read_text(
-            encoding="utf-8"
-        )
+        text = (ROOT / "packages" / package / "pyproject.toml").read_text(encoding="utf-8")
         assert "tool.uv.sources" not in text
         assert "typer" not in text.lower()
         assert "click" not in text.lower()
@@ -208,9 +260,7 @@ def test_public_pyprojects_contain_no_workspace_paths_or_typer() -> None:
 # fields are also the only ones nothing else in the repository reads, so without this they are
 # unverified by construction. The assertions are about presence and shape, never the text of a
 # field, so ordinary editing stays free.
-REQUIRED_URLS = frozenset(
-    {"Homepage", "Repository", "Issues", "Documentation", "Changelog"}
-)
+REQUIRED_URLS = frozenset({"Homepage", "Repository", "Issues", "Documentation", "Changelog"})
 SHARED_CLASSIFIERS = frozenset(
     {
         "Development Status :: 4 - Beta",
@@ -228,9 +278,7 @@ def _urls(package: str) -> dict[str, str]:
     declared = _project(package).get("urls", {})
     if not isinstance(declared, dict):
         return {}
-    return {
-        str(key): str(value) for key, value in cast(dict[str, object], declared).items()
-    }
+    return {str(key): str(value) for key, value in cast(dict[str, object], declared).items()}
 
 
 @pytest.mark.parametrize("package", sorted(PUBLIC))
@@ -264,7 +312,11 @@ def test_third_party_runtime_dependencies_are_exact() -> None:
     through igraph alone, so it declares none.
     """
     expected = {
-        "damicore_normalizer": {"pandas>=2.2,<4", "pydantic>=2.10,<3"},
+        "damicore_normalizer": {
+            "openpyxl>=3.1,<4",
+            "pandas>=2.2,<4",
+            "pydantic>=2.10,<3",
+        },
         "damicore_distance": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
         "damicore_tree_builder": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
         "damicore_clusterizer": {"igraph>=1.0,<1.1", "pydantic>=2.10,<3"},
@@ -317,7 +369,10 @@ def test_the_aggregate_requires_the_pandas_extra_of_the_distance_package() -> No
     """`pip install damicore` has to bring pandas with it: the documented quickstart calls
     result.distance_matrix.head(). Depending on the bare distribution would leave that
     example raising at runtime while every wheel still resolved and installed cleanly."""
-    assert "damicore-distance[pandas]>=0.1.0,<0.2.0" in _dependencies("damicore")
+    version = _version("damicore")
+    major, minor, _ = _release(version)
+    ceiling = f"<{major}.{minor + 1}.0"
+    assert f"damicore-distance[pandas]>={version},{ceiling}" in _dependencies("damicore")
 
 
 def test_public_packages_declare_one_lockstep_version() -> None:
@@ -410,12 +465,10 @@ def test_the_aggregate_publishes_only_after_the_stages_it_depends_on() -> None:
             re.MULTILINE | re.DOTALL,
         )
     )
-    assert {"publish-pypi", "publish-pypi-stages", "github-release"} <= blocks.keys(), (
-        sorted(blocks)
+    assert {"publish-pypi", "publish-pypi-stages", "github-release"} <= blocks.keys(), sorted(
+        blocks
     )
-    aggregate_needs = re.search(
-        r"^    needs:\s*(.+)$", blocks["publish-pypi"], re.MULTILINE
-    )
+    aggregate_needs = re.search(r"^    needs:\s*(.+)$", blocks["publish-pypi"], re.MULTILINE)
     assert aggregate_needs is not None, blocks["publish-pypi"]
     assert "publish-pypi-stages" in aggregate_needs.group(1), aggregate_needs.group(1)
     # The stages must still be the matrix leg, or "after the stages" would mean one of them.
@@ -430,15 +483,11 @@ RETIRED_SPECIFICATION = "DAMICORE_IMPLEMENTATION" + "_SPECIFICATION"
 # puts arbitrary text between them. Anchoring on the number instead of on a fixed pair of
 # words is what makes the guard total. No example is spelled out here: this file is scanned
 # like every other, so a literal citation in this comment would match itself.
-SECTION_CITATION = re.compile(
-    r"\b(sections?|specifications?)\s+\d+(\.\d+)*\b", re.IGNORECASE
-)
+SECTION_CITATION = re.compile(r"\b(sections?|specifications?)\s+\d+(\.\d+)*\b", re.IGNORECASE)
 # Published standards number their own sections, and this is a CSV project, so a line citing
 # RFC 4180 or a PEP is expected prose rather than a dangling pointer. Judged per line, so an
 # external citation does not excuse the rest of the file.
-EXTERNAL_STANDARD = re.compile(
-    r"\b(RFC|PEP|ISO|IEEE)\b|Apache License|License, Version"
-)
+EXTERNAL_STANDARD = re.compile(r"\b(RFC|PEP|ISO|IEEE)\b|Apache License|License, Version")
 SCANNED_SUFFIXES = {
     ".cfg",
     ".ipynb",
@@ -512,15 +561,38 @@ def test_every_test_module_declares_a_registered_marker() -> None:
 
     The registered set is read from the root configuration rather than restated, so adding a
     marker there is the only edit needed to make it usable.
+
+    Registered in **both** scopes a suite runs in. Pytest resolves its configuration from the
+    rootdir of the invocation and inherits nothing from a parent, so a member's own
+    `[tool.pytest.ini_options]` is the whole registry for `make -C packages/<name> test` --
+    the command AGENTS.md sends a change to first.
+
+    What registration buys is not selection: `-m contract` matches a mark whether or not it
+    is declared. It is the ability to tell a marker from a typo. Only a registered set makes
+    `pytest.mark.contarct` reportable -- as a warning, and as a collection error under
+    `--strict-markers` -- so a member missing a marker cannot distinguish the two in the one
+    scope where its own tests are usually run.
     """
     configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     pytest_options = configuration["tool"]["pytest"]["ini_options"]
     declared_markers = pytest_options["markers"]
     assert isinstance(declared_markers, list)
     registered = {
-        str(entry).split(":", 1)[0].strip()
-        for entry in cast(list[object], declared_markers)
+        str(entry).split(":", 1)[0].strip() for entry in cast(list[object], declared_markers)
     }
+
+    members = sorted(
+        directory
+        for directory in (ROOT / "packages").iterdir()
+        if (directory / "pyproject.toml").is_file()
+    )
+    assert len(members) >= len(PUBLIC), members
+    for member in members:
+        options = _tool(member / "pyproject.toml")["pytest"]
+        assert isinstance(options, dict)
+        member_markers = cast(dict[str, object], options)["ini_options"]
+        assert isinstance(member_markers, dict)
+        assert cast(dict[str, object], member_markers)["markers"] == declared_markers, member.name
 
     modules = sorted(ROOT.glob("packages/*/tests/test_*.py")) + sorted(
         ROOT.glob("tests/*/test_*.py")
@@ -544,6 +616,97 @@ def test_every_test_module_declares_a_registered_marker() -> None:
     assert not unregistered, unregistered
 
 
+def test_marker_registration_is_enforced_rather_than_advisory() -> None:
+    """The registry above only means something if using a marker outside it fails.
+
+    Without `--strict-markers`, `pytest.mark.contarct` marks nothing, reports a warning that
+    scrolls past in a green run, and leaves the test silently unselectable by the name its
+    author meant. The flag turns that into a collection error, which is what makes the
+    registry a contract instead of a list. Required in every configuration a suite is run
+    from, because pytest reads exactly one of them per invocation.
+    """
+    configurations = [ROOT / "pyproject.toml"] + [
+        directory / "pyproject.toml"
+        for directory in sorted((ROOT / "packages").iterdir())
+        if (directory / "pyproject.toml").is_file()
+    ]
+    assert len(configurations) > len(PUBLIC), configurations
+    for path in configurations:
+        options = cast(dict[str, object], _tool(path)["pytest"])["ini_options"]
+        assert isinstance(options, dict)
+        addopts = str(cast(dict[str, object], options).get("addopts", ""))
+        assert "--strict-markers" in addopts, path.relative_to(ROOT).as_posix()
+
+
+class _ResolvedThenTested(ast.NodeVisitor):
+    """Find names bound from a ``.resolve()`` call and later asked whether they are symlinks.
+
+    ``Path.resolve()`` returns the path with every link already followed, so the result is
+    never itself a symlink and such a test can never be true. The pattern is not a style
+    preference: it reads as a guard, which is worse than having none, and six of them
+    accumulated across three packages before anything looked. Containment survives without it
+    -- a link out of a directory resolves outside and fails ``is_relative_to`` -- so refusing
+    a link genuinely requires testing the path *before* resolving it, which is what
+    ``DamicoreResult.save`` does and what this check leaves alone.
+    """
+
+    def __init__(self) -> None:
+        self.resolved: set[str] = set()
+        self.hits: list[tuple[str, int]] = []
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        value = node.value
+        if (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Attribute)
+            and value.func.attr == "resolve"
+        ):
+            self.resolved.update(
+                target.id for target in node.targets if isinstance(target, ast.Name)
+            )
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        function = node.func
+        if (
+            isinstance(function, ast.Attribute)
+            and function.attr == "is_symlink"
+            and isinstance(function.value, ast.Name)
+            and function.value.id in self.resolved
+        ):
+            self.hits.append((function.value.id, node.lineno))
+        self.generic_visit(node)
+
+
+def test_no_symlink_check_sits_behind_a_resolve_call() -> None:
+    """A guard that cannot fire is worse than no guard, so nothing may grow a seventh.
+
+    Coverage cannot catch this: the clause lives inside a compound condition that is
+    evaluated on every call, so the line counts as covered while that operand stays false
+    forever. Only reading the code -- or this -- can tell.
+    """
+    modules = [
+        path
+        for directory in sorted((ROOT / "packages").iterdir())
+        if (directory / "src").is_dir()
+        for path in (directory / "src").rglob("*.py")
+        if "__pycache__" not in path.parts
+    ]
+    # Guards the discovery: an empty scan would make the assertion below vacuous.
+    assert len(modules) >= len(PUBLIC), len(modules)
+
+    dead: list[str] = []
+    for module in modules:
+        visitor = _ResolvedThenTested()
+        visitor.visit(ast.parse(module.read_text(encoding="utf-8"), filename=str(module)))
+        dead.extend(
+            f"{module.relative_to(ROOT)}:{line} tests {name}.is_symlink(), "
+            f"but {name} came from a resolve() call"
+            for name, line in visitor.hits
+        )
+    assert not dead, dead
+
+
 def test_type_check_configuration_covers_every_workspace_package() -> None:
     """Guard the type gate against silently checking nothing.
 
@@ -558,9 +721,7 @@ def test_type_check_configuration_covers_every_workspace_package() -> None:
       the stage-error translation table, and the public surface is asserted instead by
       `test_public_exports_are_exact` above.
     """
-    configuration = json.loads(
-        (ROOT / "pyrightconfig.json").read_text(encoding="utf-8")
-    )
+    configuration = json.loads((ROOT / "pyrightconfig.json").read_text(encoding="utf-8"))
     included = configuration["include"]
     assert isinstance(included, list)
     entries = {str(entry) for entry in cast(list[object], included)}
@@ -576,6 +737,26 @@ def test_type_check_configuration_covers_every_workspace_package() -> None:
             if (directory / area).is_dir():
                 relative = f"packages/{directory.name}/{area}"
                 assert relative in entries, relative
+
+
+def test_the_repository_root_declares_the_ruff_settings_it_lints_everything_else_by() -> None:
+    """The workspace's Ruff settings must reach the code that lives outside `packages/`.
+
+    Ruff resolves its configuration per file, by walking up from that file to the nearest
+    `pyproject.toml` that declares `[tool.ruff]`. The six package sections therefore govern
+    `packages/<member>/**` and nothing else: with no section at the root, `tests/`,
+    `benchmarks/` and `.github/scripts` fall back to Ruff's built-in defaults, so `make check`
+    lints them under a rule set and a line length the repository never chose -- passing on a
+    line it would reject inside a package, and never sorting their imports at all.
+
+    Asserted equal to a member's section rather than restated here, because Ruff requires the
+    section at each root it resolves and this test is what keeps those copies one rule. Which
+    member is immaterial: the test above already holds all six equal to each other.
+    """
+    root = _tool(ROOT / "pyproject.toml")
+    assert "ruff" in root, "the repository root declares no [tool.ruff]"
+    member = _tool(ROOT / "packages" / "damicore" / "pyproject.toml")
+    assert root["ruff"] == member["ruff"], (root["ruff"], member["ruff"])
 
 
 def test_package_tool_configuration_does_not_drift() -> None:

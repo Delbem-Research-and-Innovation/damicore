@@ -13,6 +13,7 @@ import hashlib
 import json
 import zlib
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -29,11 +30,11 @@ pytestmark = pytest.mark.unit
 # exercised below and to give the deflate window something to match on.
 PAYLOAD = st.binary(max_size=96)
 CHUNK_BYTES = st.integers(min_value=1, max_value=48)
-COMPRESSOR = st.sampled_from(["zlib", "gzip"])
+COMPRESSOR: st.SearchStrategy[Literal["zlib", "gzip"]] = st.sampled_from(["zlib", "gzip"])
 LEVEL = st.integers(min_value=0, max_value=9)
 
 
-def _direct_size(*payloads: bytes, compressor: str, level: int) -> int:
+def _direct_size(*payloads: bytes, compressor: Literal["zlib", "gzip"], level: int) -> int:
     """Compress payloads in one pass, in memory, as the reference for ``compressed_size``.
 
     Deliberately shares nothing with the implementation except zlib itself: no file handles
@@ -80,8 +81,10 @@ def _normalization_manifest(directory: Path, payloads: list[bytes]) -> Path:
     manifest_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
+                "object_encoding": "json-lines/1",
                 "input": {
+                    "kind": "delimited",
                     "path": str(directory / "synthetic.csv"),
                     "sha256": hashlib.sha256(b"".join(payloads)).hexdigest(),
                     "size_bytes": sum(len(payload) for payload in payloads),
@@ -103,7 +106,7 @@ def test_chunked_compression_matches_a_direct_single_shot_stream(
     tmp_path_factory: pytest.TempPathFactory,
     payload: bytes,
     chunk_bytes: int,
-    compressor: str,
+    compressor: Literal["zlib", "gzip"],
     level: int,
 ) -> None:
     directory = tmp_path_factory.mktemp("chunked")
@@ -137,7 +140,7 @@ def test_pair_compression_equals_compressing_the_joined_bytes(
     left: bytes,
     right: bytes,
     chunk_bytes: int,
-    compressor: str,
+    compressor: Literal["zlib", "gzip"],
 ) -> None:
     """C(xy) feeds x then y through one compressor instance and must equal compressing the
     concatenation, which the implementation never materializes."""

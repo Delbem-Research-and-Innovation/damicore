@@ -84,7 +84,7 @@ def test_cli_envelope_reports_the_public_code_of_a_translated_stage_failure(
     source = tmp_path / "duplicate.csv"
     source.write_text("a,a\n1,2\n", encoding="utf-8")
     assert main(["run", str(source), "--no-progress", "--output-dir", str(tmp_path / "out")]) == 2
-    assert json.loads(capsys.readouterr().err)["code"] == "csv_format_error"
+    assert json.loads(capsys.readouterr().err)["code"] == "dataset_format_error"
 
 
 def test_cli_interrupt_exit_code(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

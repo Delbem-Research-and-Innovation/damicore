@@ -1,7 +1,7 @@
 [project]
 name = "damicore"
-version = "0.1.0"
-description = "Clusters the rows or columns of a CSV through exact compression distance, deterministic Neighbor Joining, and FastGreedy community detection."
+version = "0.2.0"
+description = "Clusters files, or the rows or columns of a dataset, through exact compression distance, deterministic Neighbor Joining, and FastGreedy community detection."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -20,12 +20,12 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Typing :: Typed",
 ]
-keywords = ["damicore", "clustering", "ncd", "compression-distance", "neighbor-joining", "community-detection", "csv"]
+keywords = ["damicore", "clustering", "ncd", "compression-distance", "neighbor-joining", "community-detection", "csv", "xlsx"]
 dependencies = [
-    "damicore-normalizer>=0.1.0,<0.2.0",
-    "damicore-distance[pandas]>=0.1.0,<0.2.0",
-    "damicore-tree-builder>=0.1.0,<0.2.0",
-    "damicore-clusterizer>=0.1.0,<0.2.0",
+    "damicore-normalizer>=0.2.0,<0.3.0",
+    "damicore-distance[pandas]>=0.2.0,<0.3.0",
+    "damicore-tree-builder>=0.2.0,<0.3.0",
+    "damicore-clusterizer>=0.2.0,<0.3.0",
     "numpy>=1.26,<3",
     "pandas>=2.2,<4",
     "pydantic>=2.10,<3",
@@ -65,8 +65,18 @@ select = ["E", "F", "I", "RUF100", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = ["unit: fast isolated unit tests"]
+# The whole workspace marker registry. Pytest inherits no ini options from a parent, so the
+# list has to exist in every rootdir a suite is run from; why that matters, and what a missing
+# entry actually costs, is in test_every_test_module_declares_a_registered_marker, which also
+# holds these copies equal to the root.
+markers = [
+    "unit: fast isolated unit tests",
+    "contract: cross-package contract tests",
+    "e2e: complete pipeline tests",
+    "notebook: executable notebook tests",
+    "slow: stress and benchmark-adjacent tests",
+]
 # --cov-branch and the floor mirror the root configuration on purpose: coverage resolves
 # its config from the working directory, so a package-scoped run would otherwise report
 # line coverage with no threshold and read as a stronger result than it is.
-addopts = "--cov=damicore --cov-branch --cov-report=term-missing --cov-fail-under=90"
+addopts = "--strict-markers --cov=damicore --cov-branch --cov-report=term-missing --cov-fail-under=90"

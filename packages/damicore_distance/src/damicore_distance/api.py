@@ -17,7 +17,7 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from pathlib import Path
-from typing import Any, Protocol, TypeVar
+from typing import Any, Literal, Protocol, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -85,13 +85,16 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
     root = manifest_path.parent.resolve()
     for raw in manifest.objects:
         relative = Path(raw.relative_path)
+        # Resolved before it is judged, so what is decided here is containment and kind: an
+        # entry linking out of the artifact root resolves outside it and fails is_relative_to,
+        # and one linking within is read like any other object, its bytes still held to the
+        # recorded digest below.
         candidate = (root / relative).resolve()
         if (
             relative.is_absolute()
             or ".." in relative.parts
             or not candidate.is_relative_to(root)
             or not candidate.is_file()
-            or candidate.is_symlink()
         ):
             raise DistanceError(
                 "Normalization object path escapes its artifact root",
@@ -118,7 +121,9 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
 
 
 # One shard's work: its index, its pairs, and the run-wide inputs a worker process needs.
-WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], str, int, int]
+WorkerArguments = tuple[
+    int, list[tuple[int, int]], list[str], list[int], Literal["zlib", "gzip"], int, int
+]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
 
 
@@ -494,7 +499,9 @@ def compute_distance_matrix(
                 )
             completed_pairs += len(shard)
     raw_paths = [str(path) for path in paths]
-    arguments = (
+    # Annotated rather than inferred: a tuple display widens the compressor literal to str,
+    # which would put the widening back that the parameter type exists to prevent.
+    arguments: Iterator[WorkerArguments] = (
         (
             index,
             shard,

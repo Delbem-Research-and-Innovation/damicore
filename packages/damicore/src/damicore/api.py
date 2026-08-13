@@ -6,6 +6,7 @@ import json
 import logging
 import shutil
 import sys
+from collections.abc import Sequence
 from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal
@@ -27,13 +28,17 @@ from damicore_distance import (
     compute_distance_matrix,
 )
 from damicore_normalizer import (
+    DelimitedSource,
+    FileCorpusSource,
     NormalizationConfig,
+    NormalizationManifest,
     NormalizationResult,
     NormalizerError,
     ObjectDescriptor,
-    normalize_csv,
+    SpreadsheetSource,
+    materialize_objects,
 )
-from damicore_normalizer.manifest import NormalizationManifest
+from damicore_normalizer.config import ObjectSource
 from damicore_tree_builder import (
     Tree,
     TreeBuildConfig,
@@ -50,8 +55,8 @@ from damicore.errors import (
     ClusterizationError,
     CompressionError,
     ConfigurationError,
-    CSVFormatError,
     DamicoreError,
+    DatasetFormatError,
     DistanceComputationError,
     DistanceMatrixValidationError,
     InputValidationError,
@@ -81,7 +86,7 @@ from damicore.pipeline import (
 from damicore.progress import distance_progress
 from damicore.result import DamicoreResult, RunReport, artifact_paths
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 # Read from the installed distribution rather than restated here. This value is stamped
 # into every manifest as run provenance, so a third copy of the version string could put
 # a number in an artifact that no distribution ever carried. It raises when damicore is
@@ -89,16 +94,20 @@ SCHEMA_VERSION = 1
 VERSION = metadata.version("damicore")
 logger = logging.getLogger(__name__)
 
-# ResourceLimitError itself carries the distinction between CSV size and object count,
-# because that is what tells a caller whether the run is reshapable at all: a wider CSV
-# stays feasible, more rows does not.
+# ResourceLimitError carries the distinction between input size and object count, because
+# that is what tells a caller whether the run is reshapable at all. The guidance names how
+# each source produces objects rather than assuming a split: a corpus has none, so advice
+# phrased purely in splits would be unactionable for the source that most easily trips the
+# object cap.
 _SCALE_GUIDANCE = (
-    "NCD is quadratic and Neighbor Joining cubic in the object count, so a multi-gigabyte CSV "
-    "stays feasible while the object count is moderate, which is the usual case for "
-    "split='columns'. Streaming and memory maps bound RAM but not that work, so split='rows' "
-    "over a large file creates one object per row and is rejected here rather than later. "
-    "Reshape the split, reduce the input, or raise individual ResourceLimits after reviewing "
-    "estimate(); free disk is never bypassed."
+    "NCD is quadratic and Neighbor Joining cubic in the object count, so what decides "
+    "feasibility is how many objects the source produces, not how many bytes it holds. A "
+    "multi-gigabyte dataset stays feasible while that count is moderate, which is the usual "
+    "case for split='columns'; split='rows' over the same file creates one object per row. A "
+    "files source creates one object per file, so its object count is the size of the corpus. "
+    "Streaming and memory maps bound RAM but not that work, which is why this is rejected "
+    "here rather than later. Reshape the source, reduce the input, or raise individual "
+    "ResourceLimits after reviewing estimate(); free disk is never bypassed."
 )
 
 
@@ -129,47 +138,108 @@ def _validated_compressor(compressor: str) -> Literal["zlib", "gzip"]:
     raise ConfigurationError("compressor must be exactly 'zlib' or 'gzip'")
 
 
-def _normalization_config(
-    split: Literal["columns", "rows"],
-    delimiter: str,
-    encoding: str,
-    execution: ExecutionConfig,
-) -> NormalizationConfig:
+# Every argument that belongs to a given source, named once. An argument that does not apply
+# is rejected rather than ignored: silently dropping `delimiter` for a workbook would let a
+# caller believe a setting took effect, and the artifacts would look valid while answering a
+# question nobody asked.
+_SOURCE_ARGUMENTS: dict[str, frozenset[str]] = {
+    "delimited": frozenset({"split", "delimiter", "encoding"}),
+    "xlsx": frozenset({"split", "sheet"}),
+    "files": frozenset({"recursive", "include_hidden"}),
+}
+
+
+def _object_source(
+    source_kind: str,
+    *,
+    split: str | None,
+    delimiter: str | None,
+    encoding: str | None,
+    sheet: str | None,
+    recursive: bool | None,
+    include_hidden: bool | None,
+) -> ObjectSource:
+    """Build the stage-level source description, rejecting settings it cannot honour."""
+    if source_kind not in _SOURCE_ARGUMENTS:
+        raise ConfigurationError("source_kind must be exactly 'delimited', 'xlsx' or 'files'")
+    supplied: dict[str, object] = {
+        "split": split,
+        "delimiter": delimiter,
+        "encoding": encoding,
+        "sheet": sheet,
+        "recursive": recursive,
+        "include_hidden": include_hidden,
+    }
+    accepted = _SOURCE_ARGUMENTS[source_kind]
+    rejected = sorted(
+        name for name, value in supplied.items() if value is not None and name not in accepted
+    )
+    if rejected:
+        raise ConfigurationError(f"{', '.join(rejected)} does not apply to a {source_kind} source")
     try:
-        return NormalizationConfig(
-            split=split,
-            delimiter=delimiter,
-            encoding=encoding,
-            chunk_rows=execution.csv_chunk_rows,
+        if source_kind == "files":
+            return FileCorpusSource(
+                recursive=True if recursive is None else recursive,
+                include_hidden=False if include_hidden is None else include_hidden,
+            )
+        checked_split = _validated_split("columns" if split is None else split)
+        if source_kind == "xlsx":
+            return SpreadsheetSource(split=checked_split, sheet=sheet)
+        return DelimitedSource(
+            split=checked_split,
+            delimiter="," if delimiter is None else delimiter,
+            encoding="utf-8" if encoding is None else encoding,
         )
     except (LookupError, ValidationError) as exc:
         raise ConfigurationError(str(exc)) from exc
 
 
+def _normalization_config(
+    object_source: ObjectSource,
+    execution: ExecutionConfig,
+) -> NormalizationConfig:
+    try:
+        return NormalizationConfig(source=object_source, chunk_rows=execution.csv_chunk_rows)
+    except (LookupError, ValidationError) as exc:
+        raise ConfigurationError(str(exc)) from exc
+
+
 def estimate(
-    csv_path: str | Path,
+    source: str | Path | Sequence[str | Path],
     *,
-    split: str = "columns",
-    delimiter: str = ",",
-    encoding: str = "utf-8",
+    source_kind: str = "delimited",
+    split: str | None = None,
+    delimiter: str | None = None,
+    encoding: str | None = None,
+    sheet: str | None = None,
+    recursive: bool | None = None,
+    include_hidden: bool | None = None,
     keep_normalized: bool = False,
     save_diagnostics: bool = False,
     execution: ExecutionConfig | None = None,
 ) -> ResourceEstimate:
     """Inspect exact resource requirements without creating run artifacts.
 
-    The whole CSV is hashed and scanned, but nothing is written: no run directory, no
-    normalized objects. Exceeding a limit is not a failure here, which is what makes this the
-    cheap way to decide whether a run is worth starting.
+    The whole input is hashed and scanned, but nothing is written: no run directory, no
+    materialized objects. Exceeding a limit is not a failure here, which is what makes this
+    the cheap way to decide whether a run is worth starting.
 
     Parameters
     ----------
+    source
+        A dataset file, a directory of files, or a sequence of file paths. Which of those is
+        accepted follows ``source_kind``.
+    source_kind
+        Exactly ``"delimited"``, ``"xlsx"``, or ``"files"``. It decides where objects come
+        from, and therefore which of the remaining arguments apply; supplying one that does
+        not apply is a ``ConfigurationError`` rather than a silently ignored setting.
     split
-        Exactly ``"columns"`` or ``"rows"``. It decides what one object is, and therefore the
-        object count that every resource gate is quadratic or cubic in.
+        Exactly ``"columns"`` or ``"rows"``, defaulting to ``"columns"``. It decides what one
+        object is for a dataset, and therefore the object count that every resource gate is
+        quadratic or cubic in. It does not apply to ``"files"``, where each file is an object.
     keep_normalized
-        Accepted for parity with :func:`run` and deliberately ignored: normalized bytes exist
-        on disk while a run is in progress either way, so they are always counted.
+        Accepted for parity with :func:`run` and deliberately ignored: object bytes exist on
+        disk while a run is in progress either way, so they are always counted.
     execution
         ``None`` uses the defaults. Free disk is measured against ``./damicore-results``,
         since no output directory has been chosen yet; a run writing elsewhere may see a
@@ -184,23 +254,30 @@ def estimate(
     Raises
     ------
     ConfigurationError
-        ``split`` is not one of the two accepted values, or ``delimiter``, ``encoding`` or
-        ``execution`` is rejected by validation.
+        ``source_kind`` or ``split`` is not one of its accepted values, an argument does not
+        apply to this source, or ``delimiter``, ``encoding`` or ``execution`` is rejected by
+        validation.
     InputValidationError
-        ``csv_path`` is not a readable regular file, or the file changed while it was being
-        hashed and scanned (code ``input_drift``).
-    CSVFormatError
-        The CSV violates the CSV contract.
+        An input path is not a readable regular file, a corpus breaks the corpus rules, or an
+        input changed while it was being hashed and scanned (code ``input_drift``).
+    DatasetFormatError
+        The dataset violates the input contract.
     """
-    checked_split = _validated_split(split)
     settings = _execution(execution)
-    _normalization_config(checked_split, delimiter, encoding, settings)
-    return preflight(
-        csv_path,
-        split=checked_split,
+    object_source = _object_source(
+        source_kind,
+        split=split,
         delimiter=delimiter,
         encoding=encoding,
-        keep_normalized=keep_normalized,
+        sheet=sheet,
+        recursive=recursive,
+        include_hidden=include_hidden,
+    )
+    _normalization_config(object_source, settings)
+    del keep_normalized
+    return preflight(
+        source,
+        object_source=object_source,
         save_diagnostics=save_diagnostics,
         execution=settings,
         disk_target=Path.cwd() / "damicore-results",
@@ -209,9 +286,7 @@ def estimate(
 
 def _config_payload(
     *,
-    split: str,
-    delimiter: str,
-    encoding: str,
+    object_source: ObjectSource,
     compressor: str,
     compression_level: int,
     num_clusters: int | None,
@@ -219,10 +294,19 @@ def _config_payload(
     save_diagnostics: bool,
     execution: ExecutionConfig,
 ) -> dict[str, object]:
+    # Flattened from the source model rather than restated: the union owns which settings
+    # exist for which kind, and a setting that does not apply records `None` instead of a
+    # default that was never in force. That keeps the configuration hash honest, so two runs
+    # differing only in source cannot collide onto the same run directory.
+    described = object_source.model_dump(mode="json")
     return {
-        "split": split,
-        "delimiter": delimiter,
-        "encoding": encoding,
+        "source_kind": described["kind"],
+        "split": described.get("split"),
+        "delimiter": described.get("delimiter"),
+        "encoding": described.get("encoding"),
+        "sheet": described.get("sheet"),
+        "recursive": described.get("recursive"),
+        "include_hidden": described.get("include_hidden"),
         "compressor": compressor,
         "compression_level": compression_level,
         "num_clusters": num_clusters,
@@ -406,7 +490,9 @@ _STAGE_TRANSLATIONS: tuple[
         {
             "output_conflict_error": OutputDirectoryConflictError,
             "artifact_validation_error": ArtifactValidationError,
-            "csv_format_error": CSVFormatError,
+            "dataset_format_error": DatasetFormatError,
+            "corpus_validation_error": InputValidationError,
+            "input_validation_error": InputValidationError,
             "input_drift": InputValidationError,
         },
         NormalizationError,
@@ -444,7 +530,7 @@ _STAGE_TRANSLATIONS: tuple[
 # A public code is the class name in snake_case, which DamicoreError already derives. A
 # stage code must therefore never be forwarded, or the public code would report the stage's
 # internal vocabulary instead of the raised class. input_drift is the single sanctioned
-# specialization in 0.1.
+# specialization in 0.2.
 _PRESERVED_CODES = frozenset({"input_drift"})
 
 
@@ -482,11 +568,15 @@ def _artifact_inventory(run_dir: Path) -> dict[str, dict[str, object]]:
 
 
 def run(
-    csv_path: str | Path,
+    source: str | Path | Sequence[str | Path],
     *,
-    split: str = "columns",
-    delimiter: str = ",",
-    encoding: str = "utf-8",
+    source_kind: str = "delimited",
+    split: str | None = None,
+    delimiter: str | None = None,
+    encoding: str | None = None,
+    sheet: str | None = None,
+    recursive: bool | None = None,
+    include_hidden: bool | None = None,
     compressor: str = "zlib",
     compression_level: int = 6,
     num_clusters: int | None = None,
@@ -513,16 +603,33 @@ def run(
 
     Parameters
     ----------
+    source
+        A dataset file, a directory of files, or a sequence of file paths, according to
+        ``source_kind``.
+    source_kind
+        Exactly ``"delimited"``, ``"xlsx"``, or ``"files"``. It decides where objects come
+        from and therefore which of the remaining arguments apply; one that does not apply is
+        a ``ConfigurationError`` rather than a silently ignored setting. It also enters the
+        run identity, so the same corpus split differently is a different run.
     split
-        Exactly ``"columns"`` or ``"rows"``. It decides what one object is, and therefore the
-        object count that the resource gates are quadratic and cubic in.
+        Exactly ``"columns"`` or ``"rows"``, defaulting to ``"columns"``. It decides what one
+        object is for a dataset, and therefore the object count that the resource gates are
+        quadratic and cubic in. It does not apply to ``"files"``, where each file is one
+        object already.
+    sheet
+        The worksheet to read from an ``"xlsx"`` source. Required when the workbook holds more
+        than one, because defaulting to the first would silently decide which data was
+        analyzed.
+    recursive, include_hidden
+        How a ``"files"`` source is enumerated. Both are recorded in the manifest, so a corpus
+        can be reconstructed from the run rather than from the command that produced it.
     compressor
         Exactly ``"zlib"`` or ``"gzip"``. NCD values are compressor-dependent, so changing it
         changes the run identity and the results, not merely their cost.
     num_clusters
         ``None`` lets FastGreedy choose the cut. Otherwise the upper bound is the object count
-        this CSV produces with this ``split``, which is only known after preflight, so an
-        oversized value is rejected there rather than at call time.
+        this source produces, which is only known after preflight, so an oversized value is
+        rejected there rather than at call time.
     output_dir
         ``None`` writes to ``./damicore-results/<run_id>``, where ``run_id`` is derived from
         the input hash and the configuration, so repeating a call lands in the same directory
@@ -530,7 +637,7 @@ def run(
         empty, or a compatible earlier run, and is never overwritten.
     keep_normalized
         Keeps ``normalization/`` in the run directory. Otherwise it is deleted once
-        verification succeeds, since the objects are reproducible from the CSV.
+        verification succeeds, since the objects are reproducible from the source.
     progress
         Renders a progress bar for the distance stage through ``tqdm``. Purely presentational.
     execution
@@ -549,10 +656,10 @@ def run(
         An argument or configuration value is invalid, including ``num_clusters`` above the
         object count. Raised before any run directory is created.
     InputValidationError
-        ``csv_path`` is not a readable regular file, or its bytes changed between preflight
-        and normalization (code ``input_drift``).
-    CSVFormatError
-        The CSV violates the CSV contract.
+        An input path is not a readable regular file, a corpus breaks the corpus rules, or an
+        input changed between preflight and materialization (code ``input_drift``).
+    DatasetFormatError
+        The dataset violates the input contract.
     ResourceLimitError
         Preflight projected the run outside ``execution.limits``. ``context["estimate"]``
         holds the ``ResourceEstimate`` behind the decision.
@@ -583,9 +690,17 @@ def run(
         Re-raised unchanged, after the run is recorded as interrupted.
     """
     settings = _execution(execution)
-    checked_split = _validated_split(split)
+    object_source = _object_source(
+        source_kind,
+        split=split,
+        delimiter=delimiter,
+        encoding=encoding,
+        sheet=sheet,
+        recursive=recursive,
+        include_hidden=include_hidden,
+    )
     checked_compressor = _validated_compressor(compressor)
-    normalization_config = _normalization_config(checked_split, delimiter, encoding, settings)
+    normalization_config = _normalization_config(object_source, settings)
     try:
         distance_config = DistanceConfig(
             compressor=checked_compressor,
@@ -605,11 +720,8 @@ def run(
         Path(output_dir).resolve() if output_dir is not None else Path.cwd() / "damicore-results"
     )
     preview = preflight(
-        csv_path,
-        split=checked_split,
-        delimiter=delimiter,
-        encoding=encoding,
-        keep_normalized=keep_normalized,
+        source,
+        object_source=object_source,
         save_diagnostics=save_diagnostics,
         execution=settings,
         disk_target=target_hint,
@@ -628,13 +740,11 @@ def run(
     # rejected argument from paying for normalization, the NCD matrix and the tree first.
     if num_clusters is not None and num_clusters > preview.object_count:
         raise ConfigurationError(
-            f"num_clusters must be between 1 and the {preview.object_count} objects this CSV "
-            f"produces with split={checked_split!r}; got {num_clusters}"
+            f"num_clusters must be between 1 and the {preview.object_count} objects this "
+            f"{source_kind} source produces; got {num_clusters}"
         )
     config = _config_payload(
-        split=split,
-        delimiter=delimiter,
-        encoding=encoding,
+        object_source=object_source,
         compressor=compressor,
         compression_level=compression_level,
         num_clusters=num_clusters,
@@ -700,9 +810,9 @@ def run(
         "completed_at": None,
         "run_dir": str(run_dir),
         "input": {
-            "path": str(preview.csv_path),
+            "kind": preview.source_kind,
+            "paths": [str(path) for path in preview.source_paths],
             "size_bytes": preview.input_size_bytes,
-            "mtime_ns": preview.csv_path.stat().st_mtime_ns,
             "sha256": preview.input_sha256,
         },
         "config": config,
@@ -725,9 +835,14 @@ def run(
         else:
             if normalization_dir.exists():
                 shutil.rmtree(normalization_dir)
-            started = journal.stage_started("normalizing", [preview.csv_path])
-            normalization = normalize_csv(
-                preview.csv_path,
+            started = journal.stage_started("normalizing", list(preview.source_paths))
+            # The caller's own argument, not the file list preflight expanded from it. A
+            # corpus labels its objects relative to what was requested, so handing back the
+            # expanded files would re-derive that root from the files themselves: a corpus
+            # whose files all sit in one subdirectory would be labelled without it, and the
+            # set digest -- which covers labels -- would then disagree with preflight's.
+            normalization = materialize_objects(
+                source,
                 normalization_dir,
                 config=normalization_config,
             )
@@ -949,10 +1064,14 @@ def load_result(output_dir: str | Path) -> DamicoreResult:
     """Load and verify a completed DAMICORE result without executing artifact code.
 
     Every artifact the manifest declares is re-checked against its recorded size and SHA-256,
-    and any entry that is absolute, escapes the run directory, or is a symlink is rejected
-    before it is read. The matrix is memory-mapped with ``allow_pickle=False``, so no artifact
-    can execute code on load. Only runs whose manifest and report both say ``completed``, at
-    the current schema version, can be loaded; a failed or interrupted run is diagnostic only.
+    and any entry that is absolute or resolves outside the run directory is rejected before it
+    is read. Containment is the rule, not file kind: an entry is resolved before it is checked,
+    so a link and the file it points at are one path by then -- a link out of the directory is
+    refused because its target is outside, and one within it is read like any other artifact,
+    its bytes still held to the recorded digest. The matrix is memory-mapped with
+    ``allow_pickle=False``, so no artifact can execute code on load. Only runs whose manifest
+    and report both say ``completed``, at the current schema version, can be loaded; a failed
+    or interrupted run is diagnostic only.
 
     Returns
     -------
@@ -972,7 +1091,9 @@ def load_result(output_dir: str | Path) -> DamicoreResult:
     try:
         manifest = RunManifest.model_validate_json(paths.manifest.read_text(encoding="utf-8"))
         if manifest.status != "completed" or manifest.schema_version != SCHEMA_VERSION:
-            raise ArtifactValidationError("Only completed schema-v1 runs can be loaded")
+            raise ArtifactValidationError(
+                f"Only completed schema-v{SCHEMA_VERSION} runs can be loaded"
+            )
         for record in manifest.artifacts.values():
             relative = Path(record.path)
             candidate = (run_dir / relative).resolve()
@@ -980,7 +1101,6 @@ def load_result(output_dir: str | Path) -> DamicoreResult:
                 relative.is_absolute()
                 or ".." in relative.parts
                 or not candidate.is_relative_to(run_dir)
-                or candidate.is_symlink()
             ):
                 raise ArtifactValidationError("Artifact path escapes the run directory")
             if (

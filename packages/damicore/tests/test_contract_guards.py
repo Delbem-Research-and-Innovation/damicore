@@ -7,13 +7,14 @@ from importlib import import_module
 from pathlib import Path
 
 import pytest
+from damicore_normalizer import NormalizerError
 
 from damicore import (
     ArtifactValidationError,
     CheckpointMismatchError,
     ConfigurationError,
-    CSVFormatError,
     DamicoreError,
+    DatasetFormatError,
     ExecutionConfig,
     InputValidationError,
     OutputDirectoryConflictError,
@@ -32,7 +33,7 @@ pytestmark = pytest.mark.unit
 EXIT_STATUS_TABLE = [
     pytest.param(ConfigurationError("bad"), 2, id="configuration-error"),
     pytest.param(InputValidationError("bad"), 2, id="input-validation-error"),
-    pytest.param(CSVFormatError("bad"), 2, id="csv-format-error-inherits-input"),
+    pytest.param(DatasetFormatError("bad"), 2, id="dataset-format-error-inherits-input"),
     pytest.param(ResourceLimitError("bad"), 3, id="resource-limit-error"),
     pytest.param(ArtifactValidationError("bad"), 4, id="artifact-validation-error"),
     pytest.param(OutputDirectoryConflictError("bad"), 5, id="output-directory-conflict"),
@@ -84,19 +85,20 @@ def test_an_output_path_that_is_not_a_directory_is_a_typed_conflict(
     assert json.loads(capsys.readouterr().err)["code"] == "output_directory_conflict_error"
 
 
-def test_a_csv_that_cannot_be_read_is_a_typed_input_validation_error(
+def test_an_input_that_cannot_be_read_is_a_typed_input_validation_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """is_file() answers existence and type, never readability, though the message it guards
-    promises both. A dropped mount or a revoked permission fails at the read instead."""
+    """is_file() answers existence and type, never readability. A dropped mount or a revoked
+    permission fails at the read instead, and must still reach the caller as the typed public
+    failure with the CLI exit code that goes with it."""
     estimate_module = import_module("damicore.estimate")
 
-    def unreadable(path: Path) -> str:
-        raise OSError(13, "Permission denied")
+    def unreadable(*_args: object, **_kwargs: object) -> object:
+        raise NormalizerError("Could not read input", code="input_validation_error")
 
     source = tmp_path / "input.csv"
     source.write_text("a,b\naa,ab\n", encoding="utf-8")
-    monkeypatch.setattr(estimate_module, "_hash", unreadable)
+    monkeypatch.setattr(estimate_module, "scan_source", unreadable)
     assert main(["estimate", str(source)]) == 2
     assert json.loads(capsys.readouterr().err)["code"] == "input_validation_error"
 
@@ -107,30 +109,27 @@ def test_workers_below_one_is_rejected() -> None:
 
 
 def test_estimate_rejects_a_path_that_is_not_a_regular_file(tmp_path: Path) -> None:
-    with pytest.raises(InputValidationError, match="readable regular file"):
+    with pytest.raises(InputValidationError, match="not a regular file"):
         estimate(tmp_path / "absent.csv")
 
 
-def test_estimate_detects_a_csv_changed_underneath_it(
+def test_estimate_detects_an_input_that_disappeared_underneath_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Preflight hashes and then scans the CSV; if it changes between those reads the
-    estimate would describe an input the run will never see."""
+    """Preflight re-stats every input it read. One that is gone by then cannot be compared,
+    and reporting that as anything but drift would describe a run that can never happen."""
     # `damicore.estimate` the submodule is shadowed by the re-exported function of the same
     # name, so plain `import damicore.estimate as m` would bind the function instead.
     estimate_module = import_module("damicore.estimate")
 
     source = tmp_path / "input.csv"
     source.write_text("a,b\n1,2\n2,3\n", encoding="utf-8")
-    real_hash = estimate_module._hash
 
-    def mutating_hash(path: Path) -> str:
-        digest = real_hash(path)
-        source.write_text("a,b\n1,2\n2,3\n4,5\n", encoding="utf-8")
-        return digest
+    def vanishing(_paths: object) -> object:
+        raise OSError(2, "No such file or directory")
 
-    monkeypatch.setattr(estimate_module, "_hash", mutating_hash)
-    with pytest.raises(InputValidationError, match="changed during preflight") as raised:
+    monkeypatch.setattr(estimate_module, "_fingerprints", vanishing)
+    with pytest.raises(InputValidationError, match="disappeared during preflight") as raised:
         estimate(source)
     assert raised.value.code == "input_drift"
 
@@ -175,23 +174,23 @@ def test_a_failed_manifest_write_leaves_no_temporary_file(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_estimate_detects_a_csv_changed_during_the_scan(
+def test_estimate_detects_an_input_changed_during_the_scan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Preflight re-stats the input after scanning too: the scan itself is the long step, so
-    a file replaced during it would otherwise be described by an estimate of the old bytes."""
+    """Preflight re-stats the input after scanning: the scan is the long step, so a file
+    replaced during it would otherwise be described by an estimate of the old bytes."""
     estimate_module = import_module("damicore.estimate")
 
     source = tmp_path / "input.csv"
     source.write_text("a,b\n1,2\n2,3\n", encoding="utf-8")
-    real_scan = estimate_module.scan_csv
+    real_scan = estimate_module.scan_source
 
     def mutating_scan(*args: object, **kwargs: object) -> object:
         result = real_scan(*args, **kwargs)  # pyright: ignore[reportCallIssue]
         source.write_text("a,b\n1,2\n2,3\n9,9\n", encoding="utf-8")
         return result
 
-    monkeypatch.setattr(estimate_module, "scan_csv", mutating_scan)
+    monkeypatch.setattr(estimate_module, "scan_source", mutating_scan)
     with pytest.raises(InputValidationError, match="changed during preflight") as raised:
         estimate(source)
     assert raised.value.code == "input_drift"

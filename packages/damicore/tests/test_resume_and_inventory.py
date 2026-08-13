@@ -5,14 +5,16 @@ verification, and the manifest totality rules.
 
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import pytest
 from damicore_clusterizer import ClusterConfig, ClusterizerError, ClusterResult
 from damicore_distance import DistanceConfig, DistanceError, DistanceResult
 from damicore_distance.api import ProgressCallback
 from damicore_normalizer import NormalizationConfig, NormalizationResult, NormalizerError
+from damicore_normalizer.config import ObjectSource
 from pydantic import ValidationError
 
 import damicore.api as api
@@ -205,18 +207,18 @@ def test_a_partial_normalization_directory_is_rebuilt_on_resume(
     """A normalization that did not reach its receipt leaves objects nobody vouched for, so
     resume must delete the whole directory instead of normalizing on top of it."""
     source = _csv(tmp_path)
-    original = api.normalize_csv
+    original = api.materialize_objects
 
     def normalize_then_fail(
-        csv_path: str | Path,
+        source: str | Path | Sequence[str | Path],
         output_dir: str | Path,
         *,
         config: NormalizationConfig | None = None,
     ) -> NormalizationResult:
-        original(csv_path, output_dir, config=config)
+        original(source, output_dir, config=config)
         raise NormalizerError("injected failure after normalization", code="normalization_error")
 
-    monkeypatch.setattr(api, "normalize_csv", normalize_then_fail)
+    monkeypatch.setattr(api, "materialize_objects", normalize_then_fail)
     output = tmp_path / "run"
     # keep_normalized is part of the config hash, so both attempts must pass the same value
     # or the second would be refused as a different run before resume is ever considered.
@@ -254,22 +256,16 @@ def test_normalization_bytes_differing_from_preflight_stop_the_run(
     real_preflight = api.preflight
 
     def drifting_preflight(
-        csv_path: str | Path,
+        source: str | Path | Sequence[str | Path],
         *,
-        split: Literal["columns", "rows"],
-        delimiter: str,
-        encoding: str,
-        keep_normalized: bool,
+        object_source: ObjectSource,
         save_diagnostics: bool,
         execution: ExecutionConfig,
         disk_target: Path,
     ) -> ResourceEstimate:
         preview = real_preflight(
-            csv_path,
-            split=split,
-            delimiter=delimiter,
-            encoding=encoding,
-            keep_normalized=keep_normalized,
+            source,
+            object_source=object_source,
             save_diagnostics=save_diagnostics,
             execution=execution,
             disk_target=disk_target,
@@ -439,6 +435,47 @@ def test_an_artifact_reached_through_a_symlinked_directory_is_rejected(tmp_path:
     _reindex(output, "linked/planted.bin")
     with pytest.raises(ArtifactValidationError, match="escapes the run directory"):
         load_result(output)
+
+
+def test_the_loader_names_the_schema_version_it_requires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal has to name the version the loader is actually holding out for.
+
+    A message that spells the number out agrees with the constant only until one of them
+    changes, and the one a reader checks by eye is the message. Moving the constant is also
+    the only way to reach this branch through its version half at all, since the manifest
+    model pins the same number and would reject a foreign one before this line runs.
+    """
+    output = tmp_path / "run"
+    result = run(_csv(tmp_path), output_dir=output, progress=False, execution=_single_worker())
+    result.close()
+
+    monkeypatch.setattr(api, "SCHEMA_VERSION", 3)
+    with pytest.raises(ArtifactValidationError, match="schema-v3"):
+        load_result(output)
+
+
+def test_an_artifact_symlinked_within_the_run_directory_is_read(tmp_path: Path) -> None:
+    """What the loader enforces is containment, not file kind.
+
+    An inventory entry is resolved before it is checked, so a link and the file it points at
+    are the same path by the time any guard sees them: inside the run directory both are read,
+    and both still have to match the size and digest the inventory recorded. The test above
+    covers the case that matters -- resolving *outside* the run directory -- and this one pins
+    the complement, so nothing here can grow a guard that cannot fire.
+    """
+    output = tmp_path / "run"
+    result = run(_csv(tmp_path), output_dir=output, progress=False, execution=_single_worker())
+    result.close()
+    os.symlink(output / "report.json", output / "report-link.json")
+    manifest_path = output / "manifest.json"
+    manifest = _read_json(manifest_path)
+    manifest["artifacts"]["report-link.json"] = artifact_record(output / "report-link.json", output)
+    _write_json(manifest_path, manifest)
+
+    loaded = load_result(output)
+    loaded.close()
 
 
 def test_a_report_that_is_not_completed_is_rejected(tmp_path: Path) -> None:

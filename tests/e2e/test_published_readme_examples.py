@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from openpyxl import Workbook
 from synthetic_data import generate_csv
 
 pytestmark = pytest.mark.e2e
@@ -63,14 +64,39 @@ def _run(source: str, workdir: Path, label: str) -> None:
     )
 
 
+def _fixtures(directory: Path) -> None:
+    """Every input a stage README example names, so the page stays executable as written.
+
+    A README that shows a source it cannot demonstrate is the defect this module exists to
+    catch, so the harness grows with the documented surface rather than the examples being
+    trimmed to what the harness already had.
+    """
+    generate_csv(directory / "dataset.csv", rows=12, columns=4, clusters=2, seed=7)
+
+    workbook = Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    sheet.append(["alpha", "beta", "gamma"])
+    for row in range(1, 5):
+        sheet.append([f"a{row}", f"b{row}", f"c{row}"])
+    workbook.save(directory / "dataset.xlsx")
+
+    corpus = directory / "corpus"
+    corpus.mkdir()
+    for index in range(3):
+        (corpus / f"object_{index}.txt").write_text(
+            f"shared preamble\n{'variant ' * (index + 1)}\n", encoding="utf-8"
+        )
+
+
 def test_stage_readme_examples_run_and_chain(tmp_path: Path) -> None:
-    generate_csv(tmp_path / "dataset.csv", rows=12, columns=4, clusters=2, seed=7)
+    _fixtures(tmp_path)
     for package in CHAINED:
         for index, source in enumerate(_examples(package)):
             _run(source, tmp_path, f"{package}_{index}")
 
 
 def test_aggregate_readme_examples_run(tmp_path: Path) -> None:
-    generate_csv(tmp_path / "dataset.csv", rows=12, columns=4, clusters=2, seed=7)
+    _fixtures(tmp_path)
     for index, source in enumerate(_examples("damicore")):
         _run(source, tmp_path, f"damicore_{index}")

@@ -24,9 +24,10 @@ class NormalizationObject(BaseModel):
         return value
 
 
-class NormalizationInput(BaseModel):
+class DelimitedDatasetInput(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
+    kind: Literal["delimited"]
     path: str
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     size_bytes: int = Field(ge=0)
@@ -35,10 +36,46 @@ class NormalizationInput(BaseModel):
     split: Literal["columns", "rows"]
 
 
+class SpreadsheetDatasetInput(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    kind: Literal["xlsx"]
+    path: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(ge=0)
+    sheet: str
+    split: Literal["columns", "rows"]
+    cell_text_rule: Literal["v1"]
+
+
+class FileCorpusInput(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    kind: Literal["files"]
+    root: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(ge=0)
+    file_count: int = Field(ge=2)
+    recursive: bool
+    include_hidden: bool
+
+
+# Mirrors damicore_normalizer's manifest models rather than importing them: the stage
+# packages exchange versioned artifacts and never each other's code. This stage reads bytes,
+# so it needs the input block only to confirm the manifest is one it understands -- which is
+# exactly why the block must be able to describe a corpus. A single dataset-shaped model
+# made an honest file-set manifest unrepresentable and rejected it.
+NormalizationInput = Annotated[
+    DelimitedDatasetInput | SpreadsheetDatasetInput | FileCorpusInput,
+    Field(discriminator="kind"),
+]
+
+
 class NormalizationManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    schema_version: Literal[1]
+    schema_version: Literal[2]
+    object_encoding: Literal["json-lines/1", "raw-bytes/1"]
     input: NormalizationInput
     objects: tuple[NormalizationObject, ...]
 

@@ -22,7 +22,7 @@ from damicore import (
 )
 from damicore.errors import (
     CompressionError,
-    CSVFormatError,
+    DatasetFormatError,
     DistanceMatrixValidationError,
     InputValidationError,
     TreeFormatError,
@@ -85,8 +85,12 @@ def test_resource_limit_error_explains_the_object_count_distinction(tmp_path: Pa
         )
     message = str(raised.value)
     assert "quadratic" in message
+    # The guidance must name what to reshape for every source, not only the one that tripped
+    # the gate: a corpus has no split, so advice phrased purely in splits is unactionable for
+    # it, and this assertion is what keeps the message spanning the source axis.
     assert "split='columns'" in message
     assert "split='rows'" in message
+    assert "files source" in message
     carried = raised.value.context["estimate"]
     assert isinstance(carried, ResourceEstimate)
     assert carried.violations == ["max_objects"]
@@ -158,7 +162,7 @@ def test_reuse_flags_and_loader_terminal_state(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
-        (NormalizerError("csv", code="csv_format_error"), CSVFormatError),
+        (NormalizerError("dataset", code="dataset_format_error"), DatasetFormatError),
         (NormalizerError("drift", code="input_drift"), InputValidationError),
         (NormalizerError("normal", code="normalization_error"), api.NormalizationError),
         (DistanceError("compress", code="compression_error"), CompressionError),
