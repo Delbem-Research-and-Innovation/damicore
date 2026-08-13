@@ -1,4 +1,4 @@
-# DAMICORE 0.1
+# DAMICORE
 
 [![PyPI](https://img.shields.io/pypi/v/damicore)](https://pypi.org/project/damicore/)
 [![Python versions](https://img.shields.io/pypi/pyversions/damicore)](https://pypi.org/project/damicore/)
