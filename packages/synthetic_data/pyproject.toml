@@ -40,10 +40,10 @@ select = ["E", "F", "I", "RUF100", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-# The whole workspace marker registry, restated because pytest resolves ini options from
-# the rootdir of the invocation and inherits nothing from a parent: a marker missing here
-# makes `-m` select nothing in a package-scoped run. Held equal to the root list by
-# tests/architecture/test_boundaries.py.
+# The whole workspace marker registry. Pytest inherits no ini options from a parent, so the
+# list has to exist in every rootdir a suite is run from; why that matters, and what a missing
+# entry actually costs, is in test_every_test_module_declares_a_registered_marker, which also
+# holds these copies equal to the root.
 markers = [
     "unit: fast isolated unit tests",
     "contract: cross-package contract tests",
