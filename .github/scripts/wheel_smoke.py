@@ -65,9 +65,7 @@ def check_public_surface(name: str) -> None:
     check = _BEHAVIOUR_CHECKS.get(name)
     if check is not None:
         check()
-        print(
-            f"wheel-smoke: {name} public behaviour holds under its declared dependencies"
-        )
+        print(f"wheel-smoke: {name} public behaviour holds under its declared dependencies")
 
 
 def _distance_view_without_the_pandas_extra() -> None:

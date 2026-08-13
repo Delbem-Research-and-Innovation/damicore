@@ -110,9 +110,7 @@ def main() -> None:
     # A run that broke the budget is the one whose numbers are worth keeping.
     budget_failures: list[str] = []
     if run_large:
-        large_rows = _rows_for_target(
-            arguments.directory, arguments.target_bytes, columns=64
-        )
+        large_rows = _rows_for_target(arguments.directory, arguments.target_bytes, columns=64)
         large_path = generate_csv(
             arguments.directory / "large-64-columns.csv",
             rows=large_rows,
@@ -146,9 +144,7 @@ def main() -> None:
             "peak_rss_bytes": normalization_peak_rss,
         }
         if large_preview.input_size_bytes < arguments.target_bytes * 0.9:
-            budget_failures.append(
-                "large benchmark CSV did not reach 90% of target size"
-            )
+            budget_failures.append("large benchmark CSV did not reach 90% of target size")
         if normalization_peak_rss > NORMALIZATION_RSS_BUDGET_BYTES:
             budget_failures.append(
                 f"large normalization peaked at {normalization_peak_rss} bytes of RSS, "

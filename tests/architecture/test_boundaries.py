@@ -34,6 +34,11 @@ def _project(package: str) -> dict[str, object]:
         return tomllib.load(stream)["project"]
 
 
+def _tool(path: Path) -> dict[str, object]:
+    with path.open("rb") as stream:
+        return tomllib.load(stream)["tool"]
+
+
 def _version(package: str) -> str:
     return str(_project(package)["version"])
 
@@ -72,9 +77,7 @@ def _imports(path: Path) -> set[str]:
 def test_stage_packages_do_not_import_each_other_or_orchestrator() -> None:
     for stage in STAGES:
         source = ROOT / "packages" / stage / "src" / stage
-        modules = [
-            path for path in source.rglob("*.py") if "__pycache__" not in path.parts
-        ]
+        modules = [path for path in source.rglob("*.py") if "__pycache__" not in path.parts]
         assert modules, stage
         for module in modules:
             forbidden = (STAGES - {stage}) | {"damicore", "synthetic_data"}
@@ -199,9 +202,7 @@ def test_public_result_models_declare_the_specified_fields() -> None:
 
 def test_public_pyprojects_contain_no_workspace_paths_or_typer() -> None:
     for package in sorted(PUBLIC):
-        text = (ROOT / "packages" / package / "pyproject.toml").read_text(
-            encoding="utf-8"
-        )
+        text = (ROOT / "packages" / package / "pyproject.toml").read_text(encoding="utf-8")
         assert "tool.uv.sources" not in text
         assert "typer" not in text.lower()
         assert "click" not in text.lower()
@@ -212,9 +213,7 @@ def test_public_pyprojects_contain_no_workspace_paths_or_typer() -> None:
 # fields are also the only ones nothing else in the repository reads, so without this they are
 # unverified by construction. The assertions are about presence and shape, never the text of a
 # field, so ordinary editing stays free.
-REQUIRED_URLS = frozenset(
-    {"Homepage", "Repository", "Issues", "Documentation", "Changelog"}
-)
+REQUIRED_URLS = frozenset({"Homepage", "Repository", "Issues", "Documentation", "Changelog"})
 SHARED_CLASSIFIERS = frozenset(
     {
         "Development Status :: 4 - Beta",
@@ -232,9 +231,7 @@ def _urls(package: str) -> dict[str, str]:
     declared = _project(package).get("urls", {})
     if not isinstance(declared, dict):
         return {}
-    return {
-        str(key): str(value) for key, value in cast(dict[str, object], declared).items()
-    }
+    return {str(key): str(value) for key, value in cast(dict[str, object], declared).items()}
 
 
 @pytest.mark.parametrize("package", sorted(PUBLIC))
@@ -328,9 +325,7 @@ def test_the_aggregate_requires_the_pandas_extra_of_the_distance_package() -> No
     version = _version("damicore")
     major, minor, _ = _release(version)
     ceiling = f"<{major}.{minor + 1}.0"
-    assert f"damicore-distance[pandas]>={version},{ceiling}" in _dependencies(
-        "damicore"
-    )
+    assert f"damicore-distance[pandas]>={version},{ceiling}" in _dependencies("damicore")
 
 
 def test_public_packages_declare_one_lockstep_version() -> None:
@@ -423,12 +418,10 @@ def test_the_aggregate_publishes_only_after_the_stages_it_depends_on() -> None:
             re.MULTILINE | re.DOTALL,
         )
     )
-    assert {"publish-pypi", "publish-pypi-stages", "github-release"} <= blocks.keys(), (
-        sorted(blocks)
+    assert {"publish-pypi", "publish-pypi-stages", "github-release"} <= blocks.keys(), sorted(
+        blocks
     )
-    aggregate_needs = re.search(
-        r"^    needs:\s*(.+)$", blocks["publish-pypi"], re.MULTILINE
-    )
+    aggregate_needs = re.search(r"^    needs:\s*(.+)$", blocks["publish-pypi"], re.MULTILINE)
     assert aggregate_needs is not None, blocks["publish-pypi"]
     assert "publish-pypi-stages" in aggregate_needs.group(1), aggregate_needs.group(1)
     # The stages must still be the matrix leg, or "after the stages" would mean one of them.
@@ -443,15 +436,11 @@ RETIRED_SPECIFICATION = "DAMICORE_IMPLEMENTATION" + "_SPECIFICATION"
 # puts arbitrary text between them. Anchoring on the number instead of on a fixed pair of
 # words is what makes the guard total. No example is spelled out here: this file is scanned
 # like every other, so a literal citation in this comment would match itself.
-SECTION_CITATION = re.compile(
-    r"\b(sections?|specifications?)\s+\d+(\.\d+)*\b", re.IGNORECASE
-)
+SECTION_CITATION = re.compile(r"\b(sections?|specifications?)\s+\d+(\.\d+)*\b", re.IGNORECASE)
 # Published standards number their own sections, and this is a CSV project, so a line citing
 # RFC 4180 or a PEP is expected prose rather than a dangling pointer. Judged per line, so an
 # external citation does not excuse the rest of the file.
-EXTERNAL_STANDARD = re.compile(
-    r"\b(RFC|PEP|ISO|IEEE)\b|Apache License|License, Version"
-)
+EXTERNAL_STANDARD = re.compile(r"\b(RFC|PEP|ISO|IEEE)\b|Apache License|License, Version")
 SCANNED_SUFFIXES = {
     ".cfg",
     ".ipynb",
@@ -531,8 +520,7 @@ def test_every_test_module_declares_a_registered_marker() -> None:
     declared_markers = pytest_options["markers"]
     assert isinstance(declared_markers, list)
     registered = {
-        str(entry).split(":", 1)[0].strip()
-        for entry in cast(list[object], declared_markers)
+        str(entry).split(":", 1)[0].strip() for entry in cast(list[object], declared_markers)
     }
 
     modules = sorted(ROOT.glob("packages/*/tests/test_*.py")) + sorted(
@@ -571,9 +559,7 @@ def test_type_check_configuration_covers_every_workspace_package() -> None:
       the stage-error translation table, and the public surface is asserted instead by
       `test_public_exports_are_exact` above.
     """
-    configuration = json.loads(
-        (ROOT / "pyrightconfig.json").read_text(encoding="utf-8")
-    )
+    configuration = json.loads((ROOT / "pyrightconfig.json").read_text(encoding="utf-8"))
     included = configuration["include"]
     assert isinstance(included, list)
     entries = {str(entry) for entry in cast(list[object], included)}
@@ -589,6 +575,26 @@ def test_type_check_configuration_covers_every_workspace_package() -> None:
             if (directory / area).is_dir():
                 relative = f"packages/{directory.name}/{area}"
                 assert relative in entries, relative
+
+
+def test_the_repository_root_declares_the_ruff_settings_it_lints_everything_else_by() -> None:
+    """The workspace's Ruff settings must reach the code that lives outside `packages/`.
+
+    Ruff resolves its configuration per file, by walking up from that file to the nearest
+    `pyproject.toml` that declares `[tool.ruff]`. The six package sections therefore govern
+    `packages/<member>/**` and nothing else: with no section at the root, `tests/`,
+    `benchmarks/` and `.github/scripts` fall back to Ruff's built-in defaults, so `make check`
+    lints them under a rule set and a line length the repository never chose -- passing on a
+    line it would reject inside a package, and never sorting their imports at all.
+
+    Asserted equal to a member's section rather than restated here, because Ruff requires the
+    section at each root it resolves and this test is what keeps those copies one rule. Which
+    member is immaterial: the test above already holds all six equal to each other.
+    """
+    root = _tool(ROOT / "pyproject.toml")
+    assert "ruff" in root, "the repository root declares no [tool.ruff]"
+    member = _tool(ROOT / "packages" / "damicore" / "pyproject.toml")
+    assert root["ruff"] == member["ruff"], (root["ruff"], member["ruff"])
 
 
 def test_package_tool_configuration_does_not_drift() -> None:

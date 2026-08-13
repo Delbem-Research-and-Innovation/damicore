@@ -36,9 +36,7 @@ SERIAL = ExecutionConfig(workers=1)
 
 
 def _completed_run(directory: Path) -> Path:
-    source = generate_csv(
-        directory / "dataset.csv", rows=24, columns=8, clusters=2, seed=42
-    )
+    source = generate_csv(directory / "dataset.csv", rows=24, columns=8, clusters=2, seed=42)
     run_dir = directory / "run"
     result = run(
         source,
@@ -53,18 +51,14 @@ def _completed_run(directory: Path) -> Path:
 
 def test_labels_agree_across_producer_and_consumers(tmp_path: Path) -> None:
     run_dir = _completed_run(tmp_path)
-    normalization = json.loads(
-        (run_dir / "normalization/manifest.json").read_text("utf-8")
-    )
+    normalization = json.loads((run_dir / "normalization/manifest.json").read_text("utf-8"))
     labels = json.loads((run_dir / "labels.json").read_text("utf-8"))
     tree = json.loads((run_dir / "tree.json").read_text("utf-8"))
     clusters = json.loads((run_dir / "clusters.json").read_text("utf-8"))
 
     normalized_ids = [item["object_id"] for item in normalization["objects"]]
     leaf_ids = [node["id"] for node in tree["nodes"] if node["kind"] == "leaf"]
-    clustered_ids = [
-        oid for group in clusters["clusters"] for oid in group["object_ids"]
-    ]
+    clustered_ids = [oid for group in clusters["clusters"] for oid in group["object_ids"]]
 
     assert list(labels["object_ids"]) == normalized_ids
     assert set(leaf_ids) == set(normalized_ids)
@@ -102,9 +96,7 @@ def test_resume_fingerprint_projects_only_the_compat_subset() -> None:
 def test_incomplete_run_resumes_despite_environment_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = generate_csv(
-        tmp_path / "dataset.csv", rows=24, columns=8, clusters=2, seed=42
-    )
+    source = generate_csv(tmp_path / "dataset.csv", rows=24, columns=8, clusters=2, seed=42)
     run_dir = tmp_path / "run"
 
     def fail_cluster(*_args: object, **_kwargs: object) -> object:
@@ -130,9 +122,7 @@ def test_incomplete_run_resumes_despite_environment_change(
 def test_incomplete_run_rejects_incompatible_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = generate_csv(
-        tmp_path / "dataset.csv", rows=24, columns=8, clusters=2, seed=42
-    )
+    source = generate_csv(tmp_path / "dataset.csv", rows=24, columns=8, clusters=2, seed=42)
     run_dir = tmp_path / "run"
 
     def fail_cluster(*_args: object, **_kwargs: object) -> object:
@@ -199,9 +189,7 @@ def test_a_resumed_run_publishes_the_same_bytes_as_a_fresh_one(
     have. The distance package asserts that for its own matrix; nothing asserted it over the
     artifacts a user actually reads.
     """
-    source = generate_csv(
-        tmp_path / "dataset.csv", rows=24, columns=8, clusters=2, seed=42
-    )
+    source = generate_csv(tmp_path / "dataset.csv", rows=24, columns=8, clusters=2, seed=42)
 
     fresh_dir = tmp_path / "fresh"
     fresh = run(source, output_dir=fresh_dir, progress=False, execution=SERIAL)
@@ -225,9 +213,7 @@ def test_a_resumed_run_publishes_the_same_bytes_as_a_fresh_one(
         resumed.close()
 
     for name in DATA_ARTIFACTS:
-        assert (resumed_dir / name).read_bytes() == (fresh_dir / name).read_bytes(), (
-            name
-        )
+        assert (resumed_dir / name).read_bytes() == (fresh_dir / name).read_bytes(), name
 
 
 def test_the_reported_ncd_range_agrees_with_the_persisted_matrix(
@@ -246,9 +232,7 @@ def test_the_reported_ncd_range_agrees_with_the_persisted_matrix(
 
     assert report["ncd_min"] == pytest.approx(float(matrix.min()))
     assert report["ncd_max"] == pytest.approx(float(matrix.max()))
-    assert report["ncd_out_of_range_count"] == int(
-        ((matrix < 0.0) | (matrix > 1.0)).sum()
-    )
+    assert report["ncd_out_of_range_count"] == int(((matrix < 0.0) | (matrix > 1.0)).sum())
     # The max is a real measurement rather than the diagonal: NCD above 1 is legal and this
     # fixture stays under it, so the maximum has to come from an off-diagonal pair.
     assert report["ncd_max"] > 0.0
@@ -295,9 +279,7 @@ def _source(kind: str, directory: Path) -> Path:
         return _corpus_fixture(directory / "corpus")
     if kind == "xlsx":
         return _workbook_fixture(directory / "dataset.xlsx")
-    return generate_csv(
-        directory / "dataset.csv", rows=24, columns=6, clusters=2, seed=42
-    )
+    return generate_csv(directory / "dataset.csv", rows=24, columns=6, clusters=2, seed=42)
 
 
 @pytest.mark.parametrize("kind", SOURCES)
@@ -319,18 +301,14 @@ def test_labels_agree_across_producer_and_consumers_for_every_source(
     )
     result.close()
 
-    normalization = json.loads(
-        (run_dir / "normalization/manifest.json").read_text("utf-8")
-    )
+    normalization = json.loads((run_dir / "normalization/manifest.json").read_text("utf-8"))
     labels = json.loads((run_dir / "labels.json").read_text("utf-8"))
     tree = json.loads((run_dir / "tree.json").read_text("utf-8"))
     clusters = json.loads((run_dir / "clusters.json").read_text("utf-8"))
 
     normalized_ids = [item["object_id"] for item in normalization["objects"]]
     leaf_ids = [node["id"] for node in tree["nodes"] if node["kind"] == "leaf"]
-    clustered_ids = [
-        oid for group in clusters["clusters"] for oid in group["object_ids"]
-    ]
+    clustered_ids = [oid for group in clusters["clusters"] for oid in group["object_ids"]]
 
     assert list(labels["object_ids"]) == normalized_ids
     assert set(leaf_ids) == set(normalized_ids)
@@ -349,9 +327,7 @@ def test_a_resumed_run_publishes_the_same_bytes_for_every_source(
     source = _source(kind, tmp_path)
 
     fresh_dir = tmp_path / "fresh"
-    fresh = run(
-        source, source_kind=kind, output_dir=fresh_dir, progress=False, execution=SERIAL
-    )
+    fresh = run(source, source_kind=kind, output_dir=fresh_dir, progress=False, execution=SERIAL)
     fresh.close()
 
     def interrupted(*_args: object, **_kwargs: object) -> object:
@@ -382,6 +358,4 @@ def test_a_resumed_run_publishes_the_same_bytes_for_every_source(
         resumed.close()
 
     for name in DATA_ARTIFACTS:
-        assert (resumed_dir / name).read_bytes() == (fresh_dir / name).read_bytes(), (
-            name
-        )
+        assert (resumed_dir / name).read_bytes() == (fresh_dir / name).read_bytes(), name

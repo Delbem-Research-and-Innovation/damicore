@@ -22,17 +22,13 @@ def main() -> int:
         with open(path, "rb") as handle:
             version = tomllib.load(handle)["project"]["version"]
         if version != expected:
-            mismatches.append(
-                f"{path}: version {version} != expected version {expected}"
-            )
+            mismatches.append(f"{path}: version {version} != expected version {expected}")
     # The same cheap-mistake class as a version mismatch: the build job's changelog
     # extraction requires this exact heading, and discovering its absence there costs
     # the whole benchmark first.
     with open("CHANGELOG.md", encoding="utf-8") as handle:
         if f"## {expected}\n" not in handle.read():
-            mismatches.append(
-                f"CHANGELOG.md: no '## {expected}' section for this version"
-            )
+            mismatches.append(f"CHANGELOG.md: no '## {expected}' section for this version")
     # CITATION.cff states the version a citation refers to, which makes it a seventh copy
     # of the released number and the only one no packaging tool would ever notice drifting.
     # Parsed by line rather than with a YAML library: this runs on the stock interpreter of
@@ -51,8 +47,7 @@ def main() -> int:
         print("\n".join(mismatches), file=sys.stderr)
         return 1
     print(
-        f"all {len(packages)} package versions, the changelog and the citation "
-        f"agree on {expected}"
+        f"all {len(packages)} package versions, the changelog and the citation agree on {expected}"
     )
     return 0
 
