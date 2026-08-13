@@ -22,7 +22,7 @@ from damicore import (
 )
 from damicore.errors import (
     CompressionError,
-    CSVFormatError,
+    DatasetFormatError,
     DistanceMatrixValidationError,
     InputValidationError,
     TreeFormatError,
@@ -158,7 +158,7 @@ def test_reuse_flags_and_loader_terminal_state(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
-        (NormalizerError("csv", code="csv_format_error"), CSVFormatError),
+        (NormalizerError("dataset", code="dataset_format_error"), DatasetFormatError),
         (NormalizerError("drift", code="input_drift"), InputValidationError),
         (NormalizerError("normal", code="normalization_error"), api.NormalizationError),
         (DistanceError("compress", code="compression_error"), CompressionError),

@@ -1,37 +1,41 @@
 from __future__ import annotations
 
-import hashlib
 import math
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
-from damicore_normalizer.config import NormalizationConfig
-from damicore_normalizer.csv_reader import scan_csv
+from damicore_normalizer.api import scan_source
+from damicore_normalizer.config import NormalizationConfig, ObjectSource
 from damicore_normalizer.errors import NormalizerError
 from pydantic import BaseModel, ConfigDict, Field
 
 from damicore.config import ExecutionConfig
-from damicore.errors import CSVFormatError, InputValidationError
+from damicore.errors import DatasetFormatError, InputValidationError
 
 
 class ResourceEstimate(BaseModel):
-    """What a run of this CSV under this configuration would cost, measured before it starts.
+    """What a run of this source under this configuration would cost, measured before it starts.
 
-    The counts and the input and normalized byte totals come from hashing and scanning the
-    whole file, so they are exact rather than sampled; the memory and disk figures are
+    The counts and the input and object byte totals come from the same traversal the run
+    itself performs, so they are exact rather than sampled; the memory and disk figures are
     conservative projections, and free disk is the one number read from the live filesystem.
     ``within_limits`` is ``False`` exactly when ``violations`` is non-empty, and ``violations``
     names the gates in a fixed order. ``estimate()`` returns this either way; ``run()`` turns
     a non-empty ``violations`` into ``ResourceLimitError``.
+
+    ``input_sha256`` identifies the whole input: one file's digest for a dataset, and a digest
+    over every adopted file for a corpus, since no single file identifies that run.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    csv_path: Path
+    source_kind: Literal["delimited", "xlsx", "files"]
+    source_paths: tuple[Path, ...]
     input_sha256: str
     input_size_bytes: int = Field(ge=0)
-    split: Literal["columns", "rows"]
+    split: Literal["columns", "rows"] | None
     object_count: int = Field(ge=0)
     pair_count: int = Field(ge=0)
     effective_workers: int = Field(gt=0)
@@ -49,56 +53,41 @@ class ResourceEstimate(BaseModel):
     violations: list[str]
 
 
-def _hash(path: Path, chunk_size: int = 4_194_304) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(chunk_size):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _fingerprints(paths: Sequence[Path]) -> tuple[tuple[int, int], ...]:
+    stats = [path.stat() for path in paths]
+    return tuple((item.st_size, item.st_mtime_ns) for item in stats)
 
 
 def preflight(
-    csv_path: str | Path,
+    source: str | Path | Sequence[str | Path],
     *,
-    split: Literal["columns", "rows"],
-    delimiter: str,
-    encoding: str,
-    keep_normalized: bool,
+    object_source: ObjectSource,
     save_diagnostics: bool,
     execution: ExecutionConfig,
     disk_target: Path,
 ) -> ResourceEstimate:
-    del keep_normalized
-    path = Path(csv_path).resolve()
-    if not path.is_file():
-        raise InputValidationError(f"CSV path is not a readable regular file: {path}")
+    """Project a run's exact cost by performing the run's own traversal without writing.
+
+    The scan is the one the normalizer will repeat, so the object count and byte totals here
+    are the ones the run produces rather than a second estimate of them.
+    """
     try:
-        before = path.stat()
-        input_hash = _hash(path)
-        after_hash = path.stat()
-    except OSError as exc:
-        # is_file() answers existence and type, never readability. A file without read
-        # permission, on a dropped mount, or removed after the check above passes it and
-        # fails here, and the message above already promised this was checked.
-        raise InputValidationError(f"CSV path could not be read: {path}") from exc
-    if (before.st_size, before.st_mtime_ns) != (after_hash.st_size, after_hash.st_mtime_ns):
-        raise InputValidationError("CSV changed during preflight", code="input_drift")
-    try:
-        scan = scan_csv(
-            path,
-            NormalizationConfig(
-                split=split,
-                delimiter=delimiter,
-                encoding=encoding,
-                chunk_rows=execution.csv_chunk_rows,
-            ),
+        scan = scan_source(
+            source,
+            NormalizationConfig(source=object_source, chunk_rows=execution.csv_chunk_rows),
         )
     except NormalizerError as exc:
-        error_type = CSVFormatError if exc.code == "csv_format_error" else InputValidationError
+        error_type = (
+            DatasetFormatError if exc.code == "dataset_format_error" else InputValidationError
+        )
         raise error_type(str(exc), code=exc.code, stage="preflight") from exc
-    after_scan = path.stat()
-    if (before.st_size, before.st_mtime_ns) != (after_scan.st_size, after_scan.st_mtime_ns):
-        raise InputValidationError("CSV changed during preflight", code="input_drift")
+    try:
+        if _fingerprints(scan.source_paths) != scan.source_fingerprints:
+            raise InputValidationError("Input changed during preflight", code="input_drift")
+    except OSError as exc:
+        raise InputValidationError(
+            "Input disappeared during preflight", code="input_drift"
+        ) from exc
 
     objects = len(scan.objects)
     pairs = objects * (objects - 1) // 2
@@ -130,11 +119,13 @@ def preflight(
         (required_disk > available, "free_disk"),
     ]
     violations = [name for failed, name in checks if failed]
+    manifest_input = scan.manifest_input
     return ResourceEstimate(
-        csv_path=path,
-        input_sha256=input_hash,
-        input_size_bytes=before.st_size,
-        split=split,
+        source_kind=manifest_input.kind,
+        source_paths=scan.source_paths,
+        input_sha256=manifest_input.sha256,
+        input_size_bytes=manifest_input.size_bytes,
+        split=None if manifest_input.kind == "files" else manifest_input.split,
         object_count=objects,
         pair_count=pairs,
         effective_workers=execution.effective_workers,

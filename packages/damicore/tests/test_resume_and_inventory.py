@@ -8,7 +8,10 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
+from collections.abc import Sequence
+
 import pytest
+from damicore_normalizer.config import ObjectSource
 from damicore_clusterizer import ClusterConfig, ClusterizerError, ClusterResult
 from damicore_distance import DistanceConfig, DistanceError, DistanceResult
 from damicore_distance.api import ProgressCallback
@@ -205,18 +208,18 @@ def test_a_partial_normalization_directory_is_rebuilt_on_resume(
     """A normalization that did not reach its receipt leaves objects nobody vouched for, so
     resume must delete the whole directory instead of normalizing on top of it."""
     source = _csv(tmp_path)
-    original = api.normalize_csv
+    original = api.materialize_objects
 
     def normalize_then_fail(
-        csv_path: str | Path,
+        source: str | Path | Sequence[str | Path],
         output_dir: str | Path,
         *,
         config: NormalizationConfig | None = None,
     ) -> NormalizationResult:
-        original(csv_path, output_dir, config=config)
+        original(source, output_dir, config=config)
         raise NormalizerError("injected failure after normalization", code="normalization_error")
 
-    monkeypatch.setattr(api, "normalize_csv", normalize_then_fail)
+    monkeypatch.setattr(api, "materialize_objects", normalize_then_fail)
     output = tmp_path / "run"
     # keep_normalized is part of the config hash, so both attempts must pass the same value
     # or the second would be refused as a different run before resume is ever considered.
@@ -254,22 +257,16 @@ def test_normalization_bytes_differing_from_preflight_stop_the_run(
     real_preflight = api.preflight
 
     def drifting_preflight(
-        csv_path: str | Path,
+        source: str | Path | Sequence[str | Path],
         *,
-        split: Literal["columns", "rows"],
-        delimiter: str,
-        encoding: str,
-        keep_normalized: bool,
+        object_source: ObjectSource,
         save_diagnostics: bool,
         execution: ExecutionConfig,
         disk_target: Path,
     ) -> ResourceEstimate:
         preview = real_preflight(
-            csv_path,
-            split=split,
-            delimiter=delimiter,
-            encoding=encoding,
-            keep_normalized=keep_normalized,
+            source,
+            object_source=object_source,
             save_diagnostics=save_diagnostics,
             execution=execution,
             disk_target=disk_target,

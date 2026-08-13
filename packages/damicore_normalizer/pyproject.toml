@@ -1,7 +1,7 @@
 [project]
 name = "damicore-normalizer"
-version = "0.1.0"
-description = "Dataset normalization stage for the DAMICORE pipeline."
+version = "0.2.0"
+description = "Object materialization stage for the DAMICORE pipeline: delimited text, spreadsheets, and file corpora."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -20,8 +20,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Typing :: Typed",
 ]
-keywords = ["damicore", "csv", "normalization", "canonical-serialization"]
+keywords = ["damicore", "csv", "xlsx", "normalization", "canonical-serialization"]
 dependencies = [
+    "openpyxl>=3.1,<4",
     "pandas>=2.2,<4",
     "pydantic>=2.10,<3",
 ]

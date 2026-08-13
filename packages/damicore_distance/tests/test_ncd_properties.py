@@ -80,8 +80,10 @@ def _normalization_manifest(directory: Path, payloads: list[bytes]) -> Path:
     manifest_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
+                "object_encoding": "json-lines/1",
                 "input": {
+                    "kind": "delimited",
                     "path": str(directory / "synthetic.csv"),
                     "sha256": hashlib.sha256(b"".join(payloads)).hexdigest(),
                     "size_bytes": sum(len(payload) for payload in payloads),

@@ -91,8 +91,12 @@ def test_orchestrator_has_no_runtime_dependency_on_synthetic_data() -> None:
 
 def test_public_exports_are_exact() -> None:
     assert damicore_normalizer.__all__ == [
+        "materialize_objects",
         "normalize_csv",
         "NormalizationConfig",
+        "DelimitedSource",
+        "SpreadsheetSource",
+        "FileCorpusSource",
         "NormalizationResult",
         "ObjectDescriptor",
         "NormalizerError",
@@ -134,7 +138,7 @@ def test_public_exports_are_exact() -> None:
         "DamicoreError",
         "ConfigurationError",
         "InputValidationError",
-        "CSVFormatError",
+        "DatasetFormatError",
         "ResourceLimitError",
         "OutputDirectoryConflictError",
         "CheckpointMismatchError",
@@ -264,7 +268,11 @@ def test_third_party_runtime_dependencies_are_exact() -> None:
     through igraph alone, so it declares none.
     """
     expected = {
-        "damicore_normalizer": {"pandas>=2.2,<4", "pydantic>=2.10,<3"},
+        "damicore_normalizer": {
+            "openpyxl>=3.1,<4",
+            "pandas>=2.2,<4",
+            "pydantic>=2.10,<3",
+        },
         "damicore_distance": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
         "damicore_tree_builder": {"numpy>=1.26,<3", "pydantic>=2.10,<3"},
         "damicore_clusterizer": {"igraph>=1.0,<1.1", "pydantic>=2.10,<3"},
@@ -317,7 +325,10 @@ def test_the_aggregate_requires_the_pandas_extra_of_the_distance_package() -> No
     """`pip install damicore` has to bring pandas with it: the documented quickstart calls
     result.distance_matrix.head(). Depending on the bare distribution would leave that
     example raising at runtime while every wheel still resolved and installed cleanly."""
-    assert "damicore-distance[pandas]>=0.1.0,<0.2.0" in _dependencies("damicore")
+    version = _version("damicore")
+    major, minor, _ = _release(version)
+    ceiling = f"<{major}.{minor + 1}.0"
+    assert f"damicore-distance[pandas]>={version},{ceiling}" in _dependencies("damicore")
 
 
 def test_public_packages_declare_one_lockstep_version() -> None:

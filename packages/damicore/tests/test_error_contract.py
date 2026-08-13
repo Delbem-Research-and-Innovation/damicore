@@ -1,7 +1,7 @@
 """The public failure contract, which this module is the source of truth for.
 
 One rule holds for every public exception: ``code`` is the class name in snake_case, and
-``input_drift`` is the version 0.1 exception to it. That rule is what callers and the CLI's
+``input_drift`` is the version 0.2 exception to it. That rule is what callers and the CLI's
 JSON error envelope depend on, so it is asserted here as a rule over the whole hierarchy
 rather than as a per-class expectation. A class added to the hierarchy, or a stage code
 added to the translation table, is covered the moment it exists.
@@ -54,7 +54,8 @@ def test_every_public_error_derives_its_code_from_its_class_name() -> None:
 
 
 def test_default_code_conversion_handles_acronyms_and_suffixes() -> None:
-    assert _default_code("CSVFormatError") == "csv_format_error"
+    assert _default_code("NCDFormatError") == "ncd_format_error"
+    assert _default_code("DatasetFormatError") == "dataset_format_error"
     assert _default_code("OutputDirectoryConflictError") == "output_directory_conflict_error"
 
 
@@ -84,7 +85,7 @@ def test_translation_of_a_stage_default_code_reports_the_public_class() -> None:
 
 
 def test_input_drift_is_the_only_code_that_survives_translation() -> None:
-    """Exactly one specialized code is sanctioned in 0.1."""
+    """Exactly one specialized code is sanctioned in 0.2."""
     assert _PRESERVED_CODES == frozenset({"input_drift"})
     translated = _translated_stage_error(NormalizerError("boom", code="input_drift"))
     assert translated.code == "input_drift"
@@ -99,7 +100,7 @@ def test_an_unknown_stage_failure_becomes_the_base_public_error() -> None:
 
 def test_translation_preserves_the_message_and_records_the_stage() -> None:
     translated = _translated_stage_error(
-        NormalizerError("CSV header names must be unique", code="csv_format_error"),
+        NormalizerError("CSV header names must be unique", code="dataset_format_error"),
         stage="normalize",
     )
     assert str(translated) == "CSV header names must be unique"

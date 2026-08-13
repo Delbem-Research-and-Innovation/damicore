@@ -41,11 +41,15 @@ class ManifestObject(BaseModel):
 
 
 class RunInput(BaseModel):
+    """What this run read. ``paths`` is a tuple because a corpus has no single input file,
+    and ``sha256`` is that whole input's digest: one file's for a dataset, and a digest over
+    every adopted file for a corpus."""
+
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    path: str
+    kind: Literal["delimited", "xlsx", "files"]
+    paths: tuple[str, ...]
     size_bytes: int = Field(ge=0)
-    mtime_ns: int = Field(ge=0)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -62,9 +66,16 @@ class ManifestResourceLimits(BaseModel):
 class RunConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    split: Literal["columns", "rows"]
-    delimiter: str = Field(min_length=1, max_length=1)
-    encoding: str
+    # Conditional on the source rather than universal: a corpus has no split, delimiter, or
+    # encoding, and a workbook declares neither delimiter nor encoding. `None` records that
+    # the setting does not apply, which is what keeps the configuration hash honest.
+    source_kind: Literal["delimited", "xlsx", "files"]
+    split: Literal["columns", "rows"] | None
+    delimiter: str | None = Field(min_length=1, max_length=1)
+    encoding: str | None
+    sheet: str | None
+    recursive: bool | None
+    include_hidden: bool | None
     compressor: Literal["zlib", "gzip"]
     compression_level: int = Field(ge=0, le=9)
     num_clusters: int | None = Field(default=None, ge=1)
@@ -101,7 +112,7 @@ class PipelineCheckpoint(BaseModel):
 class RunManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     damicore_version: str
     run_id: str
     status: Literal[

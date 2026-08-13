@@ -8,8 +8,11 @@ import pytest
 from pydantic import ValidationError
 
 import damicore_normalizer.api as api
-import damicore_normalizer.csv_reader as csv_reader
+import damicore_normalizer.delimited_reader as delimited_reader
+import damicore_normalizer.table_split as table_split
+from damicore_normalizer.scan import ScanResult
 from damicore_normalizer import (
+    DelimitedSource,
     NormalizationConfig,
     NormalizerError,
     ObjectDescriptor,
@@ -60,7 +63,7 @@ def test_rows_use_positional_ids_and_arrays(tmp_path: Path) -> None:
     result = normalize_csv(
         _csv(tmp_path),
         tmp_path / "rows",
-        config=NormalizationConfig(split="rows", chunk_rows=1),
+        config=NormalizationConfig(source=DelimitedSource(split="rows"), chunk_rows=1),
     )
     assert [item.object_id for item in result.objects] == ["row_000001", "row_000002"]
     assert (tmp_path / "rows/objects/row_000001.jsonl").read_bytes() == b'["Ana","a,b"]\n'
@@ -72,17 +75,17 @@ def test_rows_use_positional_ids_and_arrays(tmp_path: Path) -> None:
 # that share that code. Adding a violation is adding a row, and it fails under its own name.
 INPUT_CONTRACT_VIOLATIONS = [
     pytest.param(
-        "a,a\n1,2\n", "columns", "csv_format_error", "unique", id="duplicate-header-names"
+        "a,a\n1,2\n", "columns", "dataset_format_error", "unique", id="duplicate-header-names"
     ),
-    pytest.param(",b\n1,2\n", "columns", "csv_format_error", "non-empty", id="empty-header-name"),
-    pytest.param("a,b\n", "columns", "csv_format_error", "enough data rows", id="no-data-rows"),
+    pytest.param(",b\n1,2\n", "columns", "dataset_format_error", "non-empty", id="empty-header-name"),
+    pytest.param("a,b\n", "columns", "dataset_format_error", "enough data rows", id="no-data-rows"),
     pytest.param(
-        "a\n1\n2\n", "columns", "csv_format_error", "two columns", id="one-column-columns-split"
+        "a\n1\n2\n", "columns", "dataset_format_error", "two columns", id="one-column-columns-split"
     ),
     pytest.param(
         "a,b\n1,2\n",
         "rows",
-        "csv_format_error",
+        "dataset_format_error",
         "enough data rows",
         id="one-row-rows-split",
     ),
@@ -102,16 +105,20 @@ def test_input_contract_violation_reports_its_code_and_cause(
     if text is not None:
         source.write_text(text, encoding="utf-8")
     with pytest.raises(NormalizerError, match=discriminator) as raised:
-        normalize_csv(source, tmp_path / "out", config=NormalizationConfig(split=_split(split)))
+        normalize_csv(
+            source,
+            tmp_path / "out",
+            config=NormalizationConfig(source=DelimitedSource(split=_split(split))),
+        )
     assert raised.value.code == code
 
 
-def test_scan_csv_rejects_a_missing_path_on_its_own(tmp_path: Path) -> None:
-    """scan_csv reads from the filesystem, so it is a file boundary in its own right (AGENTS.md:
-    validate at file boundaries) and must reject a missing path even when called directly,
-    not only through normalize_csv's own pre-check."""
+def test_scanning_rejects_a_missing_path_on_its_own(tmp_path: Path) -> None:
+    """scan_source reads from the filesystem, so it is a file boundary in its own right
+    (AGENTS.md: validate at file boundaries) and must reject a missing path even when called
+    directly, not only through materialize_objects' own pre-check."""
     with pytest.raises(NormalizerError) as raised:
-        csv_reader.scan_csv(tmp_path / "missing.csv", NormalizationConfig())
+        api.scan_source(tmp_path / "missing.csv", NormalizationConfig())
     assert raised.value.code == "input_validation_error"
 
 
@@ -123,7 +130,7 @@ def test_a_declared_delimiter_and_encoding_are_used_verbatim(tmp_path: Path) -> 
     result = normalize_csv(
         source,
         tmp_path / "out",
-        config=NormalizationConfig(delimiter=";", encoding="latin-1"),
+        config=NormalizationConfig(source=DelimitedSource(delimiter=";", encoding="latin-1")),
     )
     assert [item.label for item in result.objects] == ["nome", "cidade"]
     assert (tmp_path / "out/objects/column_000001.jsonl").read_bytes() == b'"Jos\xc3\xa9"\n'
@@ -149,17 +156,17 @@ def test_cell_text_is_preserved_and_escaped_only_by_json(tmp_path: Path) -> None
 # passing through pandas' own on_bad_lines translation, which raises the same code from a
 # different site. Without it, deleting _validate_record_widths outright left these passing.
 MALFORMED_INPUTS = [
-    pytest.param(b"a,b\n1,2,3\n", "line 2 has 3 fields", id="every-row-wider-than-header"),
-    pytest.param(b"a,b\n1,2,3,4\n", "line 2 has 4 fields", id="two-fields-wider-than-header"),
-    pytest.param(b"a,b\n1,2,3\n4,5\n", "line 2 has 3 fields", id="first-row-wider-than-header"),
-    pytest.param(b"a,b\n1,2\n3,4,5\n", "line 3 has 3 fields", id="later-row-wider-than-header"),
-    pytest.param(b"a,b,c\n1,2\n", "line 2 has 2 fields", id="row-narrower-than-header"),
+    pytest.param(b"a,b\n1,2,3\n", "Line 2 has 3 fields", id="every-row-wider-than-header"),
+    pytest.param(b"a,b\n1,2,3,4\n", "Line 2 has 4 fields", id="two-fields-wider-than-header"),
+    pytest.param(b"a,b\n1,2,3\n4,5\n", "Line 2 has 3 fields", id="first-row-wider-than-header"),
+    pytest.param(b"a,b\n1,2\n3,4,5\n", "Line 3 has 3 fields", id="later-row-wider-than-header"),
+    pytest.param(b"a,b,c\n1,2\n", "Line 2 has 2 fields", id="row-narrower-than-header"),
     pytest.param(
-        b"a,b,c\n1,2,3\n4,5\n", "line 3 has 2 fields", id="later-row-narrower-than-header"
+        b"a,b,c\n1,2,3\n4,5\n", "Line 3 has 2 fields", id="later-row-narrower-than-header"
     ),
-    pytest.param(b"a,\xffb\n1,2\n", "Could not read a valid CSV header", id="undecodable-header"),
+    pytest.param(b"a,\xffb\n1,2\n", "Could not read a valid delimited header", id="undecodable-header"),
     pytest.param(
-        b"a,b\n1,2\n\xff,4\n", "Could not read a valid CSV header", id="undecodable-data-row"
+        b"a,b\n1,2\n\xff,4\n", "Could not read a valid delimited header", id="undecodable-data-row"
     ),
 ]
 
@@ -169,7 +176,7 @@ MALFORMED_INPUTS = [
 # pandas would accept an input at one chunk size and reject it at another.
 @pytest.mark.parametrize("chunk_rows", [1, 2, 50])
 @pytest.mark.parametrize(("payload", "discriminator"), MALFORMED_INPUTS)
-def test_malformed_input_is_rejected_as_a_csv_format_error(
+def test_malformed_input_is_rejected_as_a_dataset_format_error(
     tmp_path: Path, payload: bytes, discriminator: str, chunk_rows: int
 ) -> None:
     """A record whose field count disagrees with the header is
@@ -180,7 +187,7 @@ def test_malformed_input_is_rejected_as_a_csv_format_error(
     output = tmp_path / "out"
     with pytest.raises(NormalizerError, match=discriminator) as raised:
         normalize_csv(source, output, config=NormalizationConfig(chunk_rows=chunk_rows))
-    assert raised.value.code == "csv_format_error"
+    assert raised.value.code == "dataset_format_error"
     assert not (output / "manifest.json").exists()
     assert not (output / "objects").exists()
 
@@ -223,10 +230,10 @@ def test_a_header_change_mid_parse_is_rejected(
     def fake_read_csv(*args: object, **kwargs: object) -> list[pd.DataFrame]:
         return chunks
 
-    monkeypatch.setattr(csv_reader.pd, "read_csv", fake_read_csv)
-    with pytest.raises(NormalizerError, match="header changed") as raised:
+    monkeypatch.setattr(delimited_reader.pd, "read_csv", fake_read_csv)
+    with pytest.raises(NormalizerError, match="Header changed") as raised:
         normalize_csv(source, tmp_path / "out")
-    assert raised.value.code == "csv_format_error"
+    assert raised.value.code == "dataset_format_error"
 
 
 def test_a_pandas_parser_error_is_translated(
@@ -239,10 +246,10 @@ def test_a_pandas_parser_error_is_translated(
     def failing_read_csv(*args: object, **kwargs: object) -> list[pd.DataFrame]:
         raise pd.errors.ParserError("boom")
 
-    monkeypatch.setattr(csv_reader.pd, "read_csv", failing_read_csv)
+    monkeypatch.setattr(delimited_reader.pd, "read_csv", failing_read_csv)
     with pytest.raises(NormalizerError) as raised:
         normalize_csv(source, tmp_path / "out")
-    assert raised.value.code == "csv_format_error"
+    assert raised.value.code == "dataset_format_error"
 
 
 def test_a_blank_line_is_a_full_width_empty_row(tmp_path: Path) -> None:
@@ -253,7 +260,7 @@ def test_a_blank_line_is_a_full_width_empty_row(tmp_path: Path) -> None:
     result = normalize_csv(
         source,
         tmp_path / "out",
-        config=NormalizationConfig(split="rows", chunk_rows=1),
+        config=NormalizationConfig(source=DelimitedSource(split="rows"), chunk_rows=1),
     )
     assert result.object_count == 3
     assert (tmp_path / "out/objects/row_000002.jsonl").read_bytes() == b'["",""]\n'
@@ -272,14 +279,14 @@ def test_more_columns_than_the_open_file_limit_stay_complete(
     source.write_text("\n".join([header, *rows]) + "\n", encoding="utf-8")
 
     peak_open_streams = 0
-    write = csv_reader._FilePool.write
+    write = table_split._FilePool.write
 
-    def counting_write(pool: csv_reader._FilePool, name: str, payload: bytes) -> None:
+    def counting_write(pool: table_split._FilePool, name: str, payload: bytes) -> None:
         nonlocal peak_open_streams
         write(pool, name, payload)
         peak_open_streams = max(peak_open_streams, len(pool._streams))
 
-    monkeypatch.setattr(csv_reader._FilePool, "write", counting_write)
+    monkeypatch.setattr(table_split._FilePool, "write", counting_write)
     result = normalize_csv(
         source,
         tmp_path / "out",
@@ -298,19 +305,19 @@ def test_more_columns_than_the_open_file_limit_stay_complete(
 def test_input_drift_during_normalization_is_detected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """input_drift is the one specialized code in v0.1 — it guards
+    """input_drift is the one specialized code in v0.2 — it guards
     against silently normalizing a CSV that changed underneath the running scan."""
     source = _csv(tmp_path)
-    real_scan_csv = api.scan_csv
+    real_scan_csv = api.scan_source
 
     def mutating_scan_csv(
         csv_path: str | Path, config: NormalizationConfig, *, objects_dir: Path
-    ) -> csv_reader.ScanResult:
+    ) -> ScanResult:
         result = real_scan_csv(csv_path, config, objects_dir=objects_dir)
         source.write_text('name,note\nAna,"a,b"\nBia,""\nCid,""\n', encoding="utf-8")
         return result
 
-    monkeypatch.setattr(api, "scan_csv", mutating_scan_csv)
+    monkeypatch.setattr(api, "scan_source", mutating_scan_csv)
     with pytest.raises(NormalizerError) as raised:
         normalize_csv(source, tmp_path / "out")
     assert raised.value.code == "input_drift"
@@ -322,17 +329,17 @@ def test_a_corrupted_written_object_fails_artifact_validation(
     """The post-write hash/size re-check guards against a written object silently diverging
     from what the manifest will claim — corrupt one object and confirm it is caught."""
     source = _csv(tmp_path)
-    real_scan_csv = api.scan_csv
+    real_scan_csv = api.scan_source
 
     def corrupting_scan_csv(
         csv_path: str | Path, config: NormalizationConfig, *, objects_dir: Path
-    ) -> csv_reader.ScanResult:
+    ) -> ScanResult:
         result = real_scan_csv(csv_path, config, objects_dir=objects_dir)
         first_object = objects_dir / result.objects[0].relative_path.removeprefix("objects/")
         first_object.write_bytes(b"corrupted\n")
         return result
 
-    monkeypatch.setattr(api, "scan_csv", corrupting_scan_csv)
+    monkeypatch.setattr(api, "scan_source", corrupting_scan_csv)
     with pytest.raises(NormalizerError) as raised:
         normalize_csv(source, tmp_path / "out")
     assert raised.value.code == "artifact_validation_error"
@@ -403,11 +410,11 @@ def test_configuration_rejects_an_invalid_value(
     delimiter: str, encoding: str, expected: type[Exception]
 ) -> None:
     with pytest.raises(expected):
-        NormalizationConfig(delimiter=delimiter, encoding=encoding)
+        DelimitedSource(delimiter=delimiter, encoding=encoding)
 
 
-# The preflight in damicore calls scan_csv without an objects_dir to size a run before
-# creating anything. max_serialized_chunk_bytes and row_count are its only outputs and they
+# The preflight in damicore calls scan_source without an objects_dir to size a run before
+# creating anything. max_serialized_chunk_bytes and record_count are its only outputs and they
 # feed the memory estimate, so a wrong value there ships a wrong estimate silently.
 @pytest.mark.parametrize(
     ("chunk_rows", "expected_max_chunk"),
@@ -422,11 +429,11 @@ def test_scanning_without_an_objects_dir_measures_without_writing(
     source = tmp_path / "input.csv"
     source.write_text("a,b\n1,2\n3,4\n", encoding="utf-8")
 
-    result = csv_reader.scan_csv(source, NormalizationConfig(chunk_rows=chunk_rows))
+    result = api.scan_source(source, NormalizationConfig(chunk_rows=chunk_rows))
 
     # Two columns of two cells; every cell serializes to `"x"\n`, four bytes.
     assert [item.object_id for item in result.objects] == ["column_000001", "column_000002"]
     assert result.total_bytes == 16
-    assert result.row_count == 2
+    assert result.record_count == 2
     assert result.max_serialized_chunk_bytes == expected_max_chunk
     assert list(tmp_path.iterdir()) == [source]
