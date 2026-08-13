@@ -274,6 +274,34 @@ def test_a_file_changed_during_materialization_is_reported_as_drift(
     assert raised.value.code == "input_drift"
 
 
+def test_a_corpus_file_that_cannot_be_read_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Enumerating the corpus and reading its bytes are two passes, so a file can be gone by the
+    time the second one wants it. That has to surface as the typed input failure naming the
+    file, not as a bare OSError from the middle of the copy.
+
+    Provoked by removing a file between the passes rather than by revoking permission on it:
+    the suite runs as root here, where a mode of 000 is not a read failure at all.
+    """
+    import damicore_normalizer.file_corpus as file_corpus
+
+    corpus = _corpus(tmp_path / "corpus", {"a.txt": b"alpha\n", "b.txt": b"beta\n"})
+    real_collect = file_corpus._collect
+
+    def collect_then_remove(
+        sources: Sequence[Path], source: FileCorpusSource
+    ) -> tuple[Path, list[Path]]:
+        root, files = real_collect(sources, source)
+        files[0].unlink()
+        return root, files
+
+    monkeypatch.setattr(file_corpus, "_collect", collect_then_remove)
+    with pytest.raises(NormalizerError, match="Could not read corpus file") as raised:
+        materialize_objects(corpus, tmp_path / "out", config=CORPUS)
+    assert raised.value.code == "input_validation_error"
+
+
 def test_a_corpus_is_copied_in_so_the_run_stays_self_contained(tmp_path: Path) -> None:
     """The object must survive the source being deleted, which is what makes checkpoint
     resume, hash re-verification, and result.save work for this source at all."""

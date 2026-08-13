@@ -1,5 +1,6 @@
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -12,9 +13,11 @@ import damicore_normalizer.delimited_reader as delimited_reader
 import damicore_normalizer.table_split as table_split
 from damicore_normalizer import (
     DelimitedSource,
+    FileCorpusSource,
     NormalizationConfig,
     NormalizerError,
     ObjectDescriptor,
+    materialize_objects,
     normalize_csv,
 )
 from damicore_normalizer.manifest import NormalizationManifest
@@ -142,6 +145,73 @@ def test_input_contract_violation_reports_its_code_and_cause(
             config=NormalizationConfig(source=DelimitedSource(split=_split(split))),
         )
     assert raised.value.code == code
+
+
+def _no_paths(tmp_path: Path) -> None:
+    materialize_objects([], tmp_path / "out")
+
+
+def _two_paths_for_one_dataset(tmp_path: Path) -> None:
+    for name in ("one.csv", "two.csv"):
+        (tmp_path / name).write_text("a,b\n1,2\n2,3\n", encoding="utf-8")
+    materialize_objects([tmp_path / "one.csv", tmp_path / "two.csv"], tmp_path / "out")
+
+
+def _a_corpus_through_the_delimited_wrapper(tmp_path: Path) -> None:
+    normalize_csv(
+        _csv(tmp_path),
+        tmp_path / "out",
+        config=NormalizationConfig(source=FileCorpusSource()),
+    )
+
+
+# The refusals the two public entry points document but no other row reaches: what a caller
+# gets for naming no input at all, for handing a dataset source several files -- the mistake
+# the files source invites -- and for asking the 0.1-compatible wrapper to do what only
+# materialize_objects does. Each is a message a user is meant to act on, so each fails here
+# under its own name rather than being reachable only by reading the source.
+@pytest.mark.parametrize(
+    ("call", "discriminator"),
+    [
+        pytest.param(_no_paths, "No input path was given", id="no-paths-at-all"),
+        pytest.param(
+            _two_paths_for_one_dataset, "takes exactly one file", id="several-paths-one-dataset"
+        ),
+        pytest.param(
+            _a_corpus_through_the_delimited_wrapper,
+            "only accepts a delimited source",
+            id="corpus-through-normalize-csv",
+        ),
+    ],
+)
+def test_a_documented_entry_point_refusal_reports_its_code_and_cause(
+    tmp_path: Path, call: Callable[[Path], None], discriminator: str
+) -> None:
+    with pytest.raises(NormalizerError, match=discriminator) as raised:
+        call(tmp_path)
+    assert raised.value.code == "input_validation_error"
+
+
+def test_an_input_that_disappeared_during_normalization_is_reported_as_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The complement of the mutation case below: there the two stats disagree, here the second
+    one cannot be taken at all. Both mean the manifest would describe bytes the run did not
+    read, so both are drift rather than a bare OSError escaping the public API."""
+    source = _csv(tmp_path)
+    real_scan = api.scan_source
+
+    def vanishing_scan(
+        path: str | Path, config: NormalizationConfig, *, objects_dir: Path
+    ) -> ScanResult:
+        result = real_scan(path, config, objects_dir=objects_dir)
+        source.unlink()
+        return result
+
+    monkeypatch.setattr(api, "scan_source", vanishing_scan)
+    with pytest.raises(NormalizerError, match="disappeared during normalization") as raised:
+        normalize_csv(source, tmp_path / "out")
+    assert raised.value.code == "input_drift"
 
 
 def test_scanning_rejects_a_missing_path_on_its_own(tmp_path: Path) -> None:
