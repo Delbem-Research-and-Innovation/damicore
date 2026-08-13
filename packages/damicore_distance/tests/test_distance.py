@@ -589,6 +589,27 @@ def test_a_non_positive_compressed_size_is_rejected(size: int) -> None:
         CompressedSizesCheckpoint(identity={}, sizes=(size, 5))
 
 
+def test_the_memory_map_close_releases_the_handle_numpy_actually_exposes(tmp_path: Path) -> None:
+    """`close()` reaches a private numpy attribute, so the assumption is pinned here.
+
+    Releasing the map deterministically is what the view promises, and the only handle numpy
+    offers is `memmap._mmap`. The call site tolerates its absence so that `close()` never
+    raises from a caller's `finally` -- but tolerating it silently would turn a renamed
+    attribute into a leaked map behind a view that still reports itself closed. This test is
+    what makes that a failure at the supported numpy range's edge instead.
+    """
+    path = tmp_path / "distance.npy"
+    np.save(path, np.zeros((2, 2), dtype=np.float64), allow_pickle=False)  # pyright: ignore[reportUnknownMemberType]
+    view = DistanceMatrixView(path, ["a", "b"])
+    try:
+        handle = getattr(view._matrix, "_mmap", None)
+        assert handle is not None, "numpy.memmap no longer exposes _mmap; close() cannot release"
+        assert not handle.closed
+    finally:
+        view.close()
+    assert handle.closed
+
+
 def test_the_matrix_view_close_is_idempotent(tmp_path: Path) -> None:
     """close() runs in callers' finally blocks, so a second call must not raise."""
     path = tmp_path / "distance.npy"
