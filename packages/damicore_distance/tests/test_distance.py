@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import pytest
@@ -23,7 +23,9 @@ from damicore_distance.ncd import normalized_compression_distance
 pytestmark = pytest.mark.unit
 
 # Mirrors damicore_distance.api._worker, which this suite wraps to inject a shard failure.
-WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], str, int, int]
+WorkerArguments = tuple[
+    int, list[tuple[int, int]], list[str], list[int], Literal["zlib", "gzip"], int, int
+]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
 
 

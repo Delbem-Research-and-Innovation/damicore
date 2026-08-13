@@ -17,7 +17,7 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from pathlib import Path
-from typing import Any, Protocol, TypeVar
+from typing import Any, Literal, Protocol, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -121,7 +121,9 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
 
 
 # One shard's work: its index, its pairs, and the run-wide inputs a worker process needs.
-WorkerArguments = tuple[int, list[tuple[int, int]], list[str], list[int], str, int, int]
+WorkerArguments = tuple[
+    int, list[tuple[int, int]], list[str], list[int], Literal["zlib", "gzip"], int, int
+]
 WorkerResult = tuple[int, list[int], list[int], list[float]]
 
 
@@ -497,7 +499,9 @@ def compute_distance_matrix(
                 )
             completed_pairs += len(shard)
     raw_paths = [str(path) for path in paths]
-    arguments = (
+    # Annotated rather than inferred: a tuple display widens the compressor literal to str,
+    # which would put the widening back that the parameter type exists to prevent.
+    arguments: Iterator[WorkerArguments] = (
         (
             index,
             shard,
