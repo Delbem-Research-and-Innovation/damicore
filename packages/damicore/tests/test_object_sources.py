@@ -353,6 +353,54 @@ def test_the_cli_runs_a_corpus_and_a_worksheet(
     assert payload["object_count"] == 3
 
 
+def _layered_corpus(root: Path) -> Path:
+    """A corpus with one file behind each enumeration policy: a subdirectory and a dot-file."""
+    root.mkdir(parents=True)
+    (root / "top.bin").write_bytes(b"top level content\n" * 4)
+    (root / "second.bin").write_bytes(b"second level content\n" * 4)
+    (root / "nested").mkdir()
+    (root / "nested/deep.bin").write_bytes(b"nested content\n" * 4)
+    (root / ".hidden.bin").write_bytes(b"hidden content\n" * 4)
+    return root
+
+
+# Both flags are `store_const`, so a wrong `const` inverts the policy without failing anything:
+# the run still completes and still clusters, over a different set of objects than the command
+# asked for. The stage suite fixes what each policy means; what these rows fix is the mapping
+# from the flag to the setting, which is the only part the orchestrator owns. The whole object
+# set is asserted rather than its size, so dropping one file and adopting another cannot pass.
+@pytest.mark.parametrize(
+    ("flags", "adopted"),
+    [
+        pytest.param(
+            [],
+            ["nested/deep.bin", "second.bin", "top.bin"],
+            id="defaults-recurse-and-skip-hidden",
+        ),
+        pytest.param(
+            ["--no-recursive"],
+            ["second.bin", "top.bin"],
+            id="no-recursive-drops-the-subdirectory",
+        ),
+        pytest.param(
+            ["--include-hidden"],
+            [".hidden.bin", "nested/deep.bin", "second.bin", "top.bin"],
+            id="include-hidden-adopts-the-dot-file",
+        ),
+    ],
+)
+def test_the_corpus_enumeration_flags_decide_the_object_set(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], flags: list[str], adopted: list[str]
+) -> None:
+    corpus = _layered_corpus(tmp_path / "corpus").resolve()
+    assert main(["estimate", str(corpus), "--source", "files", "--json", *flags]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert (
+        sorted(Path(path).relative_to(corpus).as_posix() for path in payload["source_paths"])
+        == adopted
+    )
+
+
 def test_the_cli_reports_a_rejected_setting_as_a_configuration_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
