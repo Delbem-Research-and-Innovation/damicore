@@ -638,6 +638,74 @@ def test_marker_registration_is_enforced_rather_than_advisory() -> None:
         assert "--strict-markers" in addopts, path.relative_to(ROOT).as_posix()
 
 
+class _ResolvedThenTested(ast.NodeVisitor):
+    """Find names bound from a ``.resolve()`` call and later asked whether they are symlinks.
+
+    ``Path.resolve()`` returns the path with every link already followed, so the result is
+    never itself a symlink and such a test can never be true. The pattern is not a style
+    preference: it reads as a guard, which is worse than having none, and six of them
+    accumulated across three packages before anything looked. Containment survives without it
+    -- a link out of a directory resolves outside and fails ``is_relative_to`` -- so refusing
+    a link genuinely requires testing the path *before* resolving it, which is what
+    ``DamicoreResult.save`` does and what this check leaves alone.
+    """
+
+    def __init__(self) -> None:
+        self.resolved: set[str] = set()
+        self.hits: list[tuple[str, int]] = []
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        value = node.value
+        if (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Attribute)
+            and value.func.attr == "resolve"
+        ):
+            self.resolved.update(
+                target.id for target in node.targets if isinstance(target, ast.Name)
+            )
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        function = node.func
+        if (
+            isinstance(function, ast.Attribute)
+            and function.attr == "is_symlink"
+            and isinstance(function.value, ast.Name)
+            and function.value.id in self.resolved
+        ):
+            self.hits.append((function.value.id, node.lineno))
+        self.generic_visit(node)
+
+
+def test_no_symlink_check_sits_behind_a_resolve_call() -> None:
+    """A guard that cannot fire is worse than no guard, so nothing may grow a seventh.
+
+    Coverage cannot catch this: the clause lives inside a compound condition that is
+    evaluated on every call, so the line counts as covered while that operand stays false
+    forever. Only reading the code -- or this -- can tell.
+    """
+    modules = [
+        path
+        for directory in sorted((ROOT / "packages").iterdir())
+        if (directory / "src").is_dir()
+        for path in (directory / "src").rglob("*.py")
+        if "__pycache__" not in path.parts
+    ]
+    # Guards the discovery: an empty scan would make the assertion below vacuous.
+    assert len(modules) >= len(PUBLIC), len(modules)
+
+    dead: list[str] = []
+    for module in modules:
+        visitor = _ResolvedThenTested()
+        visitor.visit(ast.parse(module.read_text(encoding="utf-8"), filename=str(module)))
+        dead.extend(
+            f"{module.relative_to(ROOT)}:{line} tests {name}.is_symlink() after {name} = ….resolve()"
+            for name, line in visitor.hits
+        )
+    assert not dead, dead
+
+
 def test_type_check_configuration_covers_every_workspace_package() -> None:
     """Guard the type gate against silently checking nothing.
 

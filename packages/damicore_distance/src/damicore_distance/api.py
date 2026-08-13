@@ -85,13 +85,16 @@ def _load_objects(manifest_path: Path) -> tuple[list[str], list[str], list[Path]
     root = manifest_path.parent.resolve()
     for raw in manifest.objects:
         relative = Path(raw.relative_path)
+        # Resolved before it is judged, so what is decided here is containment and kind: an
+        # entry linking out of the artifact root resolves outside it and fails is_relative_to,
+        # and one linking within is read like any other object, its bytes still held to the
+        # recorded digest below.
         candidate = (root / relative).resolve()
         if (
             relative.is_absolute()
             or ".." in relative.parts
             or not candidate.is_relative_to(root)
             or not candidate.is_file()
-            or candidate.is_symlink()
         ):
             raise DistanceError(
                 "Normalization object path escapes its artifact root",
