@@ -199,30 +199,73 @@ def test_estimate_reports_the_source_it_was_given(tmp_path: Path) -> None:
     assert preview.split is None
     assert preview.object_count == 4
     assert len(preview.source_paths) == 4
-    # The corpus is copied into the run directory, so its bytes are part of what a run needs.
+    # Adopted objects are the user's bytes, so the projected object bytes are the file sizes.
     assert preview.normalized_bytes == sum(path.stat().st_size for path in preview.source_paths)
-    assert preview.required_free_disk_bytes > preview.normalized_bytes
+
+
+def test_estimate_counts_the_corpus_copy_in_the_disk_requirement(tmp_path: Path) -> None:
+    """The corpus is copied into the run directory, so its bytes are part of what a run needs.
+
+    Asserted metamorphically rather than as a bound. `preflight` adds a fixed 1 MiB metadata
+    term, which for a small corpus dominates the corpus itself by two orders of magnitude, so
+    any inequality between the disk requirement and the corpus size holds whether or not the
+    copy is counted at all. Two corpora differing only in file size is what makes the
+    projection's dependence on those bytes observable: drop the copy from the projection and
+    the two requirements become equal.
+    """
+    lean_corpus = _corpus(tmp_path / "lean")
+    fat_corpus = tmp_path / "fat"
+    fat_corpus.mkdir()
+    padding = b"x" * 100_000
+    for path in sorted(lean_corpus.iterdir()):
+        (fat_corpus / path.name).write_bytes(path.read_bytes() + padding)
+
+    lean = estimate(lean_corpus, source_kind="files")
+    fat = estimate(fat_corpus, source_kind="files")
+
+    # Same file count and same names, so every other term of the projection is identical.
+    assert fat.object_count == lean.object_count
+    grown = fat.normalized_bytes - lean.normalized_bytes
+    assert grown == lean.object_count * len(padding)
+    assert fat.required_free_disk_bytes - lean.required_free_disk_bytes >= grown
 
 
 # Each row is a setting that belongs to another source. Dropping one silently would let a
-# caller believe it took effect while the artifacts answered a different question.
+# caller believe it took effect while the artifacts answered a different question. The
+# discriminator is the whole rejection reason, not just the setting's name: matching the name
+# alone is satisfied by any configuration error that happens to mention it, which would let a
+# rejection for an unrelated cause pass as this contract.
 @pytest.mark.parametrize(
     ("kwargs", "discriminator"),
     [
-        pytest.param({"source_kind": "files", "split": "rows"}, "split", id="split-on-files"),
         pytest.param(
-            {"source_kind": "files", "delimiter": ";"}, "delimiter", id="delimiter-on-files"
+            {"source_kind": "files", "split": "rows"},
+            "split does not apply to a files source",
+            id="split-on-files",
         ),
         pytest.param(
-            {"source_kind": "xlsx", "delimiter": ";"}, "delimiter", id="delimiter-on-xlsx"
+            {"source_kind": "files", "delimiter": ";"},
+            "delimiter does not apply to a files source",
+            id="delimiter-on-files",
         ),
         pytest.param(
-            {"source_kind": "xlsx", "encoding": "latin-1"}, "encoding", id="encoding-on-xlsx"
+            {"source_kind": "xlsx", "delimiter": ";"},
+            "delimiter does not apply to a xlsx source",
+            id="delimiter-on-xlsx",
         ),
-        pytest.param({"source_kind": "delimited", "sheet": "S"}, "sheet", id="sheet-on-delimited"),
+        pytest.param(
+            {"source_kind": "xlsx", "encoding": "latin-1"},
+            "encoding does not apply to a xlsx source",
+            id="encoding-on-xlsx",
+        ),
+        pytest.param(
+            {"source_kind": "delimited", "sheet": "S"},
+            "sheet does not apply to a delimited source",
+            id="sheet-on-delimited",
+        ),
         pytest.param(
             {"source_kind": "delimited", "recursive": True},
-            "recursive",
+            "recursive does not apply to a delimited source",
             id="recursive-on-delimited",
         ),
         pytest.param({"source_kind": "nonsense"}, "source_kind must be", id="unknown-source-kind"),

@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ResourceLimits(BaseModel):
-    """The gates preflight applies before a run starts, sized for the exact 0.1 algorithm.
+    """The gates preflight applies before a run starts, sized for the exact 0.2 algorithm.
 
     Raise one only after reading an ``estimate()``: NCD is quadratic and Neighbor Joining
     cubic in the object count, so a limit lifted without that check buys a run that does not
